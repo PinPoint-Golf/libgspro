@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 Mark Liversedge
+build/
+build-*/
+out/
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.gcda
+*.gcno
+*.gcov
+coverage/
+compile_commands.json
+.cache/
+*.swp
+*~
+__pycache__/
+
+# ⚠ Wire captures stay ignored by default.  A capture of a real launch monitor
+# carries the peer's IP address and its DeviceID string, which together can
+# identify a specific installation.  Fixtures are tracked one by one under
+# tests/fixtures/ after checking each is redacted.
+*.gswire
+!tests/fixtures/*.gswire
+
+# Claude-specific artefacts stay local, as in libwrist and PinPoint Studio:
+# notes and skills are working material rather than a contract, and
+# settings.local.json is per-machine permission state.
+CLAUDE.md
+.claude/
