@@ -31,10 +31,12 @@ extern "C" {
  * and a specific LAN address are refused with EACCES.  So the permissive wildcard
  * bind works and the restrictive loopback-only one does not — the opposite of the
  * rule most people carry.  Windows has no privileged-port rule at all, which is
- * why the vendor could choose 921; Linux is not characterised here and this
- * comment does not guess.  The fix is never elevated privileges — the listener is
- * unauthenticated by design (design §9.3) — it is a wildcard bind or a port above
- * 1024 on both sides.  design §6.1 has the measurements.
+ * why the vendor could choose 921.  On Linux the boundary is a setting rather
+ * than a rule: `net.ipv4.ip_unprivileged_port_start = 921` in /etc/sysctl.d lets
+ * an ordinary process bind it on any address, which beats granting the binary
+ * CAP_NET_BIND_SERVICE and beats running as root for a port that is open and
+ * unauthenticated (design §9.3).  design §6.1 has the measurements and the
+ * per-platform answers.
  */
 #define GSP_DEFAULT_PORT 921
 

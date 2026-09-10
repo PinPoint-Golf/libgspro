@@ -700,14 +700,28 @@ all. So **the default in §6.1 below is also the only configuration in which 921
 which is a happy accident rather than a design, and a host that offers "loopback only" must be
 ready to explain why the port it was using a moment ago is suddenly refused.
 
-⚠ **Linux is NOT characterised here.** The traditional rule is `CAP_NET_BIND_SERVICE` for any
-address below 1024, and `net.ipv4.ip_unprivileged_port_start` moves the boundary — neither was
-measured, and this document does not guess. Windows has no privileged-port rule at all, which is
+⚠ **On Linux the boundary is a setting, and moving it is the preferred answer.**
+`net.ipv4.ip_unprivileged_port_start` decides where the privileged range ends; dropping it to 921
+lets an ordinary process bind the protocol's own port on any address, with no capability granted
+to the binary and nothing running as root:
+
+```sh
+sudo sysctl net.ipv4.ip_unprivileged_port_start=921          # now, until reboot
+
+# and to make it survive one — applied by systemd-sysctl at boot:
+echo 'net.ipv4.ip_unprivileged_port_start = 921' | sudo tee /etc/sysctl.d/60-gspro.conf
+```
+
+That is better than the two alternatives it replaces. `CAP_NET_BIND_SERVICE` on the executable
+travels with the binary and survives an update nobody thought about; running the listener as root
+is worse still, for a port that is open and unauthenticated (§9.3). The sysctl is per-machine,
+reversible, and says exactly what it does. Windows has no privileged-port rule at all, which is
 why the vendor could choose 921 in the first place.
 
-Whatever the platform decides, the answer is never elevated privileges: this listener is
-unauthenticated (§9.3), so running it as root is the last thing to reach for. It is a wildcard
-bind, or a port above 1024 on both sides — every client examined has a port setting.
+So the answer per platform is: **Windows** — nothing to do; **macOS** — bind the wildcard, which
+is the default anyway; **Linux** — one sysctl line, or a port above 1024 on both sides. Every
+client examined has a port setting, so moving the port is always available as the fallback that
+needs no administrator at all.
 
 That makes the *error message* load-bearing. "Permission denied" and "address already in use"
 have opposite fixes, and on macOS the first one has two: bind all interfaces instead, or move the
