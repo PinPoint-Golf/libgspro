@@ -24,6 +24,11 @@ Byte-for-byte is the contract. The three things a casual re-generation would get
 | **Indentation** | `tnb_*` and `osp_*` are Newtonsoft's two spaces; `pit_*` is Boost's four; `gsp_full` and `osg_*` use tabs. A newline-splitting framer breaks on all of them |
 | **Key order** | Serialiser-determined, and it differs: `osp_*` puts `APIversion` **first** because it is a public field rather than a property, and `ocr_putt` puts `ShotDataOptions` before `BallData` |
 
+⚠ **`.gitattributes` marks this directory `-text` so git never translates a line ending
+here.** Without it a Windows checkout rewrites every `\n` as `\r\n` and the suite tests bytes
+no client ever sent — which is exactly what happened, and only CT-D24 noticed, because a stray
+`\r` is legal JSON whitespace and every other case passed against the wrong bytes.
+
 ## Provenance
 
 | File | Source | What it is here to pin |
@@ -57,7 +62,9 @@ Tags are [`../../docs/protocol.md`](../../docs/protocol.md) §0's.
 ## Adding one
 
 1. Read the client's serialisation code, not its README, and not a capture someone posted.
-2. Write the bytes it would produce, including whitespace, key order and any delimiter.
+2. Write the bytes it would produce, including whitespace, key order and any delimiter — and
+   check `xxd` agrees after committing, because a fixture that is one byte different from what
+   the client sends is evidence about nothing.
 3. Add a row above naming the source and **the one thing the fixture is here to pin**. A
    fixture that duplicates another's coverage is a slower suite and no more evidence.
 4. Add its `CT-` case to `docs/conformance.md` §3 and a row to §4.

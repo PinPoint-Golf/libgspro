@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 Mark Liversedge
+
+# ---------------------------------------------------------------------------
+# ⚠ THE FIXTURES ARE BYTE-EXACT EVIDENCE, NOT TEXT, and git must not touch a
+# byte of them.
+#
+# Each one is the exact sequence a named launch-monitor client puts on a
+# socket, down to whether it ends with a newline — three of the sixteen
+# clients delimit with '\n' and thirteen do not, and a framer must not care
+# either way (tests/fixtures/README.md).  Without this line, git's end-of-line
+# translation rewrites every '\n' as '\r\n' on a Windows checkout, so the
+# suite there tests bytes no client ever sent.
+#
+# That is not hypothetical: it is what broke CI on the commit that made the
+# conformance suite the gate.  CT-D24 walks every truncation of every fixture
+# and caught it — the five files ending with '\n' decoded one byte later than
+# the case allows.  Nothing else noticed, because a stray '\r' is legal JSON
+# whitespace: every other case passed against the wrong bytes.
+# ---------------------------------------------------------------------------
+tests/fixtures/*.json -text
