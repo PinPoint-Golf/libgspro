@@ -194,14 +194,23 @@ if(GS_BUILD_TOOLS AND GS_BUILD_FFI AND Python3_Interpreter_FOUND)
                              ENVIRONMENT "PYTHONIOENCODING=utf-8")
     endif()
 
-    set_tests_properties(python_abi python_transport PROPERTIES LABELS "conformance")
+    # The tests that dlopen gspro_ffi through ctypes. ⚠ ONE LIST, because three
+    # separate places need exactly this set — labels, the utf-8 environment, and
+    # the sanitizer preload below — and they drifted apart the moment a fourth
+    # test was added to two of them.
+    set(GS_CTYPES_TESTS python_abi python_transport)
+    if(GS_BUILD_RECORD)
+        list(APPEND GS_CTYPES_TESTS python_wire)
+    endif()
+
+    set_tests_properties(${GS_CTYPES_TESTS} PROPERTIES LABELS "conformance")
 
     # ⚠ These harnesses report in the house style — ⚠, ⛔, § — and Windows gives
     # CPython a cp1252 stdout, where writing any of them raises
     # UnicodeEncodeError and fails the test on its OUTPUT rather than its
     # subject.  The sanitizer block below REPLACES this ENVIRONMENT wholesale
     # rather than adding to it, so it repeats the variable.
-    set_tests_properties(python_abi python_transport
+    set_tests_properties(${GS_CTYPES_TESTS}
                          PROPERTIES ENVIRONMENT "PYTHONIOENCODING=utf-8")
 
     # ⚠ ASan lives in the shared object, not in the interpreter, so CPython has
@@ -223,10 +232,7 @@ if(GS_BUILD_TOOLS AND GS_BUILD_FFI AND Python3_Interpreter_FOUND)
         # the coverage this platform is missing stays legible.  The Linux/gcc
         # sanitizer job in CI is what covers them.
         if(APPLE AND GS_ENABLE_ASAN)
-            set_tests_properties(python_abi python_transport PROPERTIES DISABLED TRUE)
-            if(GS_BUILD_RECORD)
-                set_tests_properties(python_wire PROPERTIES DISABLED TRUE)
-            endif()
+            set_tests_properties(${GS_CTYPES_TESTS} PROPERTIES DISABLED TRUE)
             message(STATUS
                 "python binding tests: DISABLED under ASan on macOS — dyld refuses "
                 "to preload the Command Line Tools' ASan runtime into a ctypes host. "
@@ -251,7 +257,13 @@ if(GS_BUILD_TOOLS AND GS_BUILD_FFI AND Python3_Interpreter_FOUND)
                 endif()
             endif()
             if(EXISTS "${GS_SAN_RUNTIME}")
-                set_tests_properties(python_abi python_transport PROPERTIES ENVIRONMENT
+                # ⚠ EVERY ctypes TEST, AND THE LIST IS EASY TO LEAVE ONE OFF.
+                # python_wire was added in package 6, named in the macOS DISABLED
+                # list two blocks up and NOT here — so on Linux it ran without the
+                # preload and failed with "ASan runtime does not come first",
+                # which reads as a sanitizer fault rather than a missing name.
+                # Anything that dlopens gspro_ffi belongs in this one line.
+                set_tests_properties(${GS_CTYPES_TESTS} PROPERTIES ENVIRONMENT
                     "LD_PRELOAD=${GS_SAN_RUNTIME};ASAN_OPTIONS=detect_leaks=0;PYTHONIOENCODING=utf-8")
             elseif(GS_ENABLE_ASAN)
                 message(STATUS
