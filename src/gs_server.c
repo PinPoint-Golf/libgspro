@@ -205,90 +205,14 @@ static void emit_warning(gsp_server *s, gsp_conn_id conn, gsp_warning_code code,
     emit(s, &ev);
 }
 
-/* Defined with the wire log below; declared here because every connection
- * event is also a line in the capture. */
-static void wire_meta(gsp_server *s, const gsp_event *ev);
-
-static void emit_connection(gsp_server *s, gsp_event_type type, const gs_conn *c,
-                            gsp_close_cause cause, gsp_time_us now)
-{
-    gsp_event ev;
-    memset(&ev, 0, sizeof(ev));
-    ev.type = (uint8_t)type;
-    ev.conn = c->info.conn;
-    ev.host_time_us = now;
-    ev.u.connection.info = c->info;
-    ev.u.connection.cause = (uint8_t)cause;
-    emit(s, &ev);
-    /* ⚠ ONE HOOK COVERS ALL THREE: an open, a close the host reported, and the
-     * close gsp_server_close() reports for every connection still up.  A capture
-     * whose connections just stop, with no line saying why, cannot be read back
-     * as a session (design §7). */
-    wire_meta(s, &ev);
-}
-
-/* ------------------------------------------------------------------------ */
-/* The write ring — REFUSES rather than drops                                */
-/* ------------------------------------------------------------------------ */
-
-static bool write_ring_full(const gsp_server *s)
-{
-    return s->w_count >= s->write_ring;
-}
-
-static bool queue_write(gsp_server *s, gsp_conn_id conn, gsp_write_kind kind, int code,
-                        const char *message, const gsp_player_info *player)
-{
-    gsp_write_request *w;
-    size_t written = 0u;
-
-    if (write_ring_full(s)) {
-        return false;
-    }
-    w = &s->writes[(s->w_head + s->w_count) % s->write_ring];
-    /* ⚠ The ONLY path by which bytes leave this library, and it validates the
-     * code against the five (design §9.1).  There is no send_raw(). */
-    if (gsp_response_encode(code, message, player, (char *)w->data, sizeof(w->data),
-                            &written) < GSP_OK) {
-        return false;
-    }
-    w->conn = conn;
-    w->kind = (uint8_t)kind;
-    w->reserved = 0u;
-    w->length = (uint16_t)written;
-    s->w_count++;
-    return true;
-}
-
-/* A connection that has gone away must not leave writes addressed to it in the
- * ring: the host has nothing left to write them to (server.h). */
-static void drop_writes_for(gsp_server *s, gsp_conn_id conn)
-{
-    uint32_t i;
-    uint32_t keep = 0u;
-
-    for (i = 0; i < s->w_count; ++i) {
-        gsp_write_request *src = &s->writes[(s->w_head + i) % s->write_ring];
-        if (src->conn == conn) {
-            continue;
-        }
-        if (keep != i) {
-            s->writes[(s->w_head + keep) % s->write_ring] = *src;
-        }
-        keep++;
-    }
-    s->w_count = keep;
-}
-
-/* ------------------------------------------------------------------------ */
-/* Player information and session state                                      */
-/* ------------------------------------------------------------------------ */
-
 /*
- * ⚠ A player with nothing known says nothing.  An UNKNOWN hand or club is
- * omitted from the JSON rather than sent as a string GSPro never sends
- * (design §5.6), so a 201 with all of them unknown would be an empty Player
- * object — noise a client has to parse and learn nothing from.
+ * ⚠ THE WIRE LOG SITS HERE, ABOVE ITS CALLERS, AND NOT WHERE IT READS BEST.
+ * emit_connection() and protocol_error() both feed it, so with the section
+ * further down each needed a forward declaration — and gcc's -Wredundant-decls,
+ * which this project builds with, rejects a declaration that the definition
+ * repeats.  ⚠ clang ACCEPTS -Wredundant-decls AND IMPLEMENTS NOTHING, so a
+ * macOS build is silent about it and CI is where it surfaces.  Ordering the
+ * file so nothing needs declaring twice is the fix that holds for both.
  */
 /* ------------------------------------------------------------------------ */
 /* The wire log — design §7                                                  */
@@ -601,6 +525,88 @@ static void wire_meta(gsp_server *s, const gsp_event *ev)
                     false, withheld ? (uint8_t)GSP_WIRE_REDACTED : 0u);
 }
 
+static void emit_connection(gsp_server *s, gsp_event_type type, const gs_conn *c,
+                            gsp_close_cause cause, gsp_time_us now)
+{
+    gsp_event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = (uint8_t)type;
+    ev.conn = c->info.conn;
+    ev.host_time_us = now;
+    ev.u.connection.info = c->info;
+    ev.u.connection.cause = (uint8_t)cause;
+    emit(s, &ev);
+    /* ⚠ ONE HOOK COVERS ALL THREE: an open, a close the host reported, and the
+     * close gsp_server_close() reports for every connection still up.  A capture
+     * whose connections just stop, with no line saying why, cannot be read back
+     * as a session (design §7). */
+    wire_meta(s, &ev);
+}
+
+/* ------------------------------------------------------------------------ */
+/* The write ring — REFUSES rather than drops                                */
+/* ------------------------------------------------------------------------ */
+
+static bool write_ring_full(const gsp_server *s)
+{
+    return s->w_count >= s->write_ring;
+}
+
+static bool queue_write(gsp_server *s, gsp_conn_id conn, gsp_write_kind kind, int code,
+                        const char *message, const gsp_player_info *player)
+{
+    gsp_write_request *w;
+    size_t written = 0u;
+
+    if (write_ring_full(s)) {
+        return false;
+    }
+    w = &s->writes[(s->w_head + s->w_count) % s->write_ring];
+    /* ⚠ The ONLY path by which bytes leave this library, and it validates the
+     * code against the five (design §9.1).  There is no send_raw(). */
+    if (gsp_response_encode(code, message, player, (char *)w->data, sizeof(w->data),
+                            &written) < GSP_OK) {
+        return false;
+    }
+    w->conn = conn;
+    w->kind = (uint8_t)kind;
+    w->reserved = 0u;
+    w->length = (uint16_t)written;
+    s->w_count++;
+    return true;
+}
+
+/* A connection that has gone away must not leave writes addressed to it in the
+ * ring: the host has nothing left to write them to (server.h). */
+static void drop_writes_for(gsp_server *s, gsp_conn_id conn)
+{
+    uint32_t i;
+    uint32_t keep = 0u;
+
+    for (i = 0; i < s->w_count; ++i) {
+        gsp_write_request *src = &s->writes[(s->w_head + i) % s->write_ring];
+        if (src->conn == conn) {
+            continue;
+        }
+        if (keep != i) {
+            s->writes[(s->w_head + keep) % s->write_ring] = *src;
+        }
+        keep++;
+    }
+    s->w_count = keep;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Player information and session state                                      */
+/* ------------------------------------------------------------------------ */
+
+/*
+ * ⚠ A player with nothing known says nothing.  An UNKNOWN hand or club is
+ * omitted from the JSON rather than sent as a string GSPro never sends
+ * (design §5.6), so a 201 with all of them unknown would be an empty Player
+ * object — noise a client has to parse and learn nothing from.
+ */
+
 static bool player_has_anything(const gsp_player_info *p)
 {
     return p->handed != (uint8_t)GSP_HANDED_UNKNOWN ||
@@ -662,9 +668,6 @@ static void send_session_to(gsp_server *s, gs_conn *c, gsp_session_state state,
 /* ------------------------------------------------------------------------ */
 /* Protocol errors                                                           */
 /* ------------------------------------------------------------------------ */
-
-static void wire_client(gsp_server *s, gsp_conn_id conn, const uint8_t *data, size_t len,
-                        gsp_time_us now);
 
 static void protocol_error(gsp_server *s, gs_conn *c, gsp_protocol_error_reason reason,
                            const uint8_t *snippet, size_t snippet_len, size_t discarded,

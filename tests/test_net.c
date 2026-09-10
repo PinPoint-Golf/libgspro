@@ -678,7 +678,6 @@ GS_TEST(net_refuses_beyond_its_table)
     gsp_net *net = NULL;
     gs_client a;
     gs_client b;
-    gs_client *cl[2];
     gsp_net_stats st;
     char error[GSP_NET_ERROR_MAX];
     gsp_time_us deadline;
@@ -698,8 +697,9 @@ GS_TEST(net_refuses_beyond_its_table)
         return;
     }
 
-    cl[0] = &a;
-    cl[1] = &b;
+    /* ⚠ Pumped directly rather than through gs_run(): this case wants BOTH
+     * clients advanced whatever the listener does with them, and one of them is
+     * about to be refused. */
     gs_client_open(&a, gsp_net_port(net));
     gs_client_open(&b, gsp_net_port(net));
     deadline = gsp_net_now_us() + GS_MS(300);

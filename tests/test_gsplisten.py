@@ -23,6 +23,7 @@ Usage: test_gsplisten.py <path to gsplisten> <fixture dir>
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import socket
@@ -33,13 +34,29 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "python"))
 
 # ⚠ THE OTHER HALF OF THE CONTAINER CROSS-CHECK.  tests/test_python_wire.py
 # writes a capture in Python and reads it with the C tool; this reads a capture
 # the C recorder wrote, in Python, from a session that really went over a socket.
 # A format defined by exactly one program is defined by that program's bugs.
-from gspro.wire import Reader  # noqa: E402
+#
+# ⚠ LOADED BY PATH, NOT AS `from gspro.wire import Reader`.  Importing a submodule
+# runs the PACKAGE first, and `gspro/__init__` dlopens libgspro_ffi — so the
+# ordinary import would make this test need the FFI object, and it would then fail
+# for a reason that has nothing to do with gsplisten.  That is exactly what
+# happened on the macOS CI runner, which builds the tool and does not hand this
+# test the shared object.  `wire.py` is a pure parser with no library in it, so
+# loading the file directly is honest as well as convenient.
+_wire_spec = importlib.util.spec_from_file_location(
+    "gspro_wire_standalone", ROOT / "python" / "gspro" / "wire.py")
+_wire = importlib.util.module_from_spec(_wire_spec)
+# ⚠ REGISTERED BEFORE IT IS EXECUTED.  @dataclass resolves a class's own module
+# through sys.modules, so a module loaded by path and not registered raises
+# AttributeError on the first decorated class rather than anything that names the
+# real problem.  This is the documented order for importlib, and the reason.
+sys.modules[_wire_spec.name] = _wire
+_wire_spec.loader.exec_module(_wire)
+Reader = _wire.Reader
 
 failures = 0
 
