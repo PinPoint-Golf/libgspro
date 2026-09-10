@@ -15,21 +15,27 @@ and reads bytes; the library returns decoded messages, the replies to write, and
 lets it sit inside a Qt application on `QTcpServer`, a Python program on `asyncio`, or a POSIX
 `select` loop, and lets it be tested without a socket.
 
-⚠ **Status: the core is built and the conformance suite is green — but it has never met a real
-launch monitor.** The framer, decoder, encoder and server are implemented and all **103 cases**
-pass, clean under AddressSanitizer and UndefinedBehaviorSanitizer. Those cases and the 23
-byte-exact fixtures behind them are read from the source of sixteen real launch-monitor
-clients, not from a wire, so green means the library agrees with what those clients are
-*written* to send:
+⚠ **Status: the core and the Python binding are built, and every conformance case that can run
+without a launch monitor passes — but it has never met one.** All **103 C cases** and **nine of
+the ten host-transport cases** are green, clean under AddressSanitizer and UndefinedBehaviorSanitizer.
+Those cases and the 23 byte-exact fixtures behind them are read from the source of sixteen real
+launch-monitor clients, not from a wire, so green means the library agrees with what those
+clients are *written* to send:
 
 ```sh
 cmake --preset dev && cmake --build --preset dev && ctest --preset dev
 cmake --preset san && cmake --build --preset san && ctest --preset san
 ```
 
-Still to come: the FFI and Python binding, the reference socket transport and CLI, the wire
-log, and the first session against real hardware — which is the one that can close the open
-questions in [`docs/protocol.md` §11](docs/protocol.md). See
+Try it against a real device without writing any code:
+
+```sh
+tools/gsp_listen.py --host 0.0.0.0 --port 921 --club PT --distance 4.2
+```
+
+Still to come: the C reference socket transport and CLI, the wire log, and the first session
+against real hardware — which is the one that can close the open questions in
+[`docs/protocol.md` §11](docs/protocol.md). See
 [`docs/design.md` §11](docs/design.md#11-implementation-plan-and-status) for the sequence.
 
 ## Documentation

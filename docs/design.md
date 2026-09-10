@@ -848,7 +848,7 @@ appears.
 | 1b | **Conformance suite** ✅ | `tests/` — 103 cases, 23 byte-exact fixtures, the sans-I/O gate, an independent Python fixture cross-check, and the CMake that runs them all red | 1 |
 | 2 | **Framer + decoder** ✅ | `src/gs_frame.c`, `src/gs_decode.c`, `src/gs_encode.c`, `src/gs_misc.c` — turns CT-D, CT-K and the API family green, and CT-F apart from the two rows that drive a server | 1b |
 | 3 | **Server** ✅ | `src/gs_server.c`: connections, replies, player info, session state, events, idle alarm — turns CT-R, CT-P, CT-C, CT-X and the rest of CT-F green | 2 |
-| 4 | FFI + Python | `gspro_ffi` target, `python/gspro/`, ABI table and tests, `gsp_listen.py`, `gsp_shoot.py`, asyncio transport | 3 |
+| 4 | **FFI + Python** ✅ | `gspro_ffi` target, `python/gspro/`, `tools/gs_abi_table.c` + `tests/test_python_abi.py`, `gsp_listen.py`, `gsp_shoot.py`, asyncio transport — and nine of the ten CT-T rows, which had nothing to run against until there was a socket | 3 |
 | 5 | Reference net transport + tool | `gspro_net` (POSIX/Winsock), `gsplisten` CLI | 3 |
 | 6 | Wire log + record | `poll_wire`, `gspro_record`, `.gswire`, replay | 3 |
 | 7 | **First contact** | A session against at least one real connector ([MLM] or [R10] with its device, or PiTrac) captured to `.gswire`; §11 of the protocol document updated with what was learned; fixtures promoted from the capture | 4 or 5, 6 |

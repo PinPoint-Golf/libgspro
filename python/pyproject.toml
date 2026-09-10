@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 Mark Liversedge
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gspro"
+version = "0.1.0"
+description = "Python bindings for libgspro, the sans-I/O C library that plays the GSPro Connect server role"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "libgspro contributors" }]
+keywords = ["gspro", "golf", "launch-monitor", "open-connect", "sans-io"]
+
+# ⚠ NO DEPENDENCIES, AND THAT IS DELIBERATE.  The binding is ctypes over a
+# shared object, and the reference listener is asyncio out of the standard
+# library.  Anything else would be something a consumer has to reconcile with
+# their own stack — which is the same reason the C core links nothing.
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["gspro*"]
+
+# ⚠ THE SHARED OBJECT IS NOT PACKAGED YET, and the binding says so loudly
+# rather than half-working: it looks for `libgspro_ffi` via GSPRO_LIBRARY, then
+# the repo's build directories, then beside the package, then the platform
+# loader — and raises LibraryNotFound with the cmake lines if none of those has
+# it.  Bundling a built object per platform is its own piece of work and
+# belongs after the binding has met a launch monitor, not before.

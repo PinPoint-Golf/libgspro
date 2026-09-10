@@ -83,3 +83,106 @@ if(Python3_Interpreter_FOUND)
 else()
     message(STATUS "no python3: the fixture and coverage cross-checks will not run")
 endif()
+
+# ---------------------------------------------------------------------------
+# The Python binding
+#
+# ⚠ SAME SHAPE AGAIN, ONE REGISTER UP.  python/gspro/_types.py declares every
+# public struct and enum a SECOND time, in ctypes.  gsp_abi_check() guards
+# eleven struct SIZES at load and nothing else — not one field offset, not one
+# enumerator — and version.h says so itself: "a binding whose field is one slot
+# out passes this check and returns plausible numbers".
+#
+# `gs_abi_table` reads the real layout out of the compiler and test_python_abi
+# compares the two, in both directions, for structs, fields, enums and bounds.
+#
+# ⚠ AND THE HOST TRANSPORT CASES.  CT-T01..T10 (conformance §3.8) are about
+# what a HOST does with a real socket — reply latency, one write per message,
+# spacing a 200 from a 201, a client that vanishes mid-message.  The library
+# owns no socket by construction, so nothing in the C suite can reach them.
+# ---------------------------------------------------------------------------
+if(GS_BUILD_TOOLS AND GS_BUILD_FFI AND Python3_Interpreter_FOUND)
+    # ⚠ The .so is passed explicitly rather than discovered.  This must pin the
+    # layout of the object THIS build produced — a search that found build/dev
+    # while testing build/san would report on the wrong artefact and pass.
+    add_test(NAME python_abi
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_CURRENT_SOURCE_DIR}/test_python_abi.py
+                     $<TARGET_FILE:gs_abi_table>
+                     $<TARGET_FILE:gspro_ffi>)
+
+    add_test(NAME python_transport
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_CURRENT_SOURCE_DIR}/test_python_transport.py
+                     $<TARGET_FILE:gspro_ffi>)
+    # ⚠ CT-T05 observes a real silence.  Five seconds by default; GSP_SOAK=1
+    # runs the full five minutes the conformance row names, which is why the
+    # timeout is generous rather than tight.
+    set_tests_properties(python_transport PROPERTIES TIMEOUT 420)
+
+    set_tests_properties(python_abi python_transport PROPERTIES LABELS "conformance")
+
+    # ⚠ These harnesses report in the house style — ⚠, ⛔, § — and Windows gives
+    # CPython a cp1252 stdout, where writing any of them raises
+    # UnicodeEncodeError and fails the test on its OUTPUT rather than its
+    # subject.  The sanitizer block below REPLACES this ENVIRONMENT wholesale
+    # rather than adding to it, so it repeats the variable.
+    set_tests_properties(python_abi python_transport
+                         PROPERTIES ENVIRONMENT "PYTHONIOENCODING=utf-8")
+
+    # ⚠ ASan lives in the shared object, not in the interpreter, so CPython has
+    # to preload the runtime before dlopening it.  If the preload is merely
+    # missing the tests are left to FAIL rather than skip: a sanitizer build
+    # that quietly stops checking is the thing this project has a rule about.
+    #
+    # ⚠⚠ AND WHAT IT DOES NOT BUY.  ASan instruments the code it COMPILED.  A
+    # ctypes read happens inside CPython, which it did not, so a Python-side
+    # mistake returns plausible data here with no report at all.  What this run
+    # does catch is a fault the LIBRARY commits at the binding's request — a
+    # wrong length into gsp_server_on_bytes, a stale handle handed back in.
+    if((GS_ENABLE_ASAN OR GS_ENABLE_UBSAN) AND NOT MSVC)
+        # ⛔ macOS + ASan is the one case where the preload CANNOT exist: dyld
+        # answers `Sanitizer load violates platform policy` because the Command
+        # Line Tools' runtime is a signed platform binary that will only load
+        # into an image linked against it, and ctypes dlopen()s ours instead.
+        # DISABLED rather than unregistered, so ctest lists them every run and
+        # the coverage this platform is missing stays legible.  The Linux/gcc
+        # sanitizer job in CI is what covers them.
+        if(APPLE AND GS_ENABLE_ASAN)
+            set_tests_properties(python_abi python_transport PROPERTIES DISABLED TRUE)
+            message(STATUS
+                "python binding tests: DISABLED under ASan on macOS — dyld refuses "
+                "to preload the Command Line Tools' ASan runtime into a ctypes host. "
+                "The Linux/gcc CI sanitizer job is what covers them.")
+        else()
+            # ⚠ THE RUNTIME IS NAMED DIFFERENTLY BY EACH COMPILER.  gcc ships a
+            # shared libasan.so; clang links its runtime STATICALLY into
+            # executables, so nothing resolves the __asan_* symbols in
+            # libgspro_ffi.so when ctypes dlopen()s it, and its shared runtime
+            # lives under -print-runtime-dir with an architecture in the name.
+            set(GS_SAN_RUNTIME "")
+            execute_process(COMMAND ${CMAKE_C_COMPILER} -print-file-name=libasan.so
+                            OUTPUT_VARIABLE GS_SAN_RUNTIME
+                            OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+            if(NOT EXISTS "${GS_SAN_RUNTIME}")
+                execute_process(COMMAND ${CMAKE_C_COMPILER} -print-runtime-dir
+                                OUTPUT_VARIABLE GS_SAN_RTDIR
+                                OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+                file(GLOB GS_SAN_CANDIDATES "${GS_SAN_RTDIR}/libclang_rt.asan*.so")
+                if(GS_SAN_CANDIDATES)
+                    list(GET GS_SAN_CANDIDATES 0 GS_SAN_RUNTIME)
+                endif()
+            endif()
+            if(EXISTS "${GS_SAN_RUNTIME}")
+                set_tests_properties(python_abi python_transport PROPERTIES ENVIRONMENT
+                    "LD_PRELOAD=${GS_SAN_RUNTIME};ASAN_OPTIONS=detect_leaks=0;PYTHONIOENCODING=utf-8")
+            elseif(GS_ENABLE_ASAN)
+                message(STATUS
+                    "python binding tests: no sanitizer runtime from ${CMAKE_C_COMPILER}; "
+                    "they will run without the preload and are expected to fail")
+            endif()
+        endif()
+    endif()
+elseif(Python3_Interpreter_FOUND)
+    message(STATUS "python binding tests need GS_BUILD_TOOLS and GS_BUILD_FFI")
+endif()

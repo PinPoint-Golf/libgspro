@@ -183,6 +183,16 @@ if(GS_BUILD_FFI)
 endif()
 
 # ---------------------------------------------------------------------------
+# Tools
+#
+# ⚠ Before the tests, because tests/CMakeLists.txt registers the ABI
+# cross-check against $<TARGET_FILE:gs_abi_table>.
+# ---------------------------------------------------------------------------
+if(GS_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
+
+# ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 if(GS_BUILD_TESTS)

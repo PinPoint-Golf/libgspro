@@ -250,6 +250,20 @@ the host's socket adapter with `gsp_shoot.py`, not against the library alone.
 Run with `gsp_shoot.py` against the host's adapter (PinPoint's `GsProMonitor`, the Python
 asyncio transport, the C reference transport).
 
+**Nine of the ten run today**, in [`../tests/test_python_transport.py`](../tests/test_python_transport.py),
+against the asyncio reference transport over loopback — `ctest -R python_transport`.
+
+⚠ **That is one host adapter on one machine over the friendliest network there is.** Loopback
+does not reorder, rarely drops, and its segmentation is not a LAN's. The same checklist has to
+be run again against PinPoint's `QTcpServer` adapter and the C reference transport; a green run
+means *this* host is correct *here*.
+
+⚠ **CT-T06 is not automated and is not pretended.** It needs a client on a second machine, and
+it is the one case that can tell a listener bound to `0.0.0.0` from one bound to loopback —
+which is the difference between a launch monitor working and not (design §6.1). Run
+`tools/gsp_listen.py --host 0.0.0.0` and aim `tools/gsp_shoot.py` at it from another machine.
+`tests/test_coverage.py` carries it as the single deferred id, with that reason.
+
 | Case | Drive | Required | Because |
 |---|---|---|---|
 | CT-T01 | Connect, send CT-D01, read | one 200 within **500 ms** | [MLM] 2 s with margin |
@@ -262,6 +276,18 @@ asyncio transport, the C reference transport).
 | CT-T08 | Client disconnects mid-message | `CONNECTION_CLOSED`, no event for the partial | |
 | CT-T09 | Bind while 921 is held by another process | host reports `Error` state with the reason; no crash | design §6 |
 | CT-T10 | Host reply size | every write ≤ `GSP_WRITE_MAX`, one `write()` call each | design §5.5 |
+
+⚠ **CT-T05's window is five seconds by default, not five minutes.** The row is right and the
+suite runs a shortened form so that CI is not held for five minutes per platform; `GSP_SOAK=1`
+runs the full duration, and the case prints which it did rather than leaving the reader to
+assume. It also checks the *structural* reason silence is safe — with no idle alarm armed the
+server schedules nothing at all, so there is no timer that could fire — which the short run
+covers completely.
+
+⚠ **CT-T02's "own segment" is reported, not asserted.** Nothing can make TCP coalescing
+impossible (design §5.5); a case that demanded two segments would be testing the kernel's
+scheduler. CT-T03 asserts the thing that *can* be made true: with `write_spacing_us` set, the
+two replies are held apart in time.
 
 ---
 

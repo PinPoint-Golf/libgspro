@@ -22,25 +22,19 @@ import re
 import sys
 
 # ---------------------------------------------------------------------------
-# Deferred cases: written in the document, not yet in C, with the package from
-# docs/design.md §11 that brings them.
+# Deferred cases: written in the document, with no case anywhere yet.
 #
-# ⚠ CT-T* need a real socket and the launch-monitor simulator (tools/gsp_shoot.py).
-# They test the HOST's transport — PinPoint's QTcpServer adapter, the asyncio
-# transport, the C reference transport — not the library, which owns no socket
-# by construction.  There is nothing to run them against until package 4 or 5.
+# ⚠ ONE ENTRY, AND IT IS NOT DEFERRED FOR CONVENIENCE.  CT-T06 needs a client
+# on a SECOND MACHINE, which no amount of code on this one can simulate: it is
+# the case that tells a listener bound to 0.0.0.0 from one bound to loopback,
+# and that is the difference between a launch monitor working and not
+# (design §6.1).  tests/test_python_transport.py prints how to run it by hand.
+#
+# The other nine CT-T rows ran as soon as there was a socket to run them
+# against — package 4's asyncio transport and tools/gsp_shoot.py.
 # ---------------------------------------------------------------------------
 DEFERRED = {
-    "T01": "package 4/5 — needs a socket and gsp_shoot.py",
-    "T02": "package 4/5 — needs a socket and gsp_shoot.py",
-    "T03": "package 4/5 — needs a socket and gsp_shoot.py",
-    "T04": "package 4/5 — needs a socket and gsp_shoot.py",
-    "T05": "package 4/5 — needs a socket and gsp_shoot.py",
-    "T06": "package 4/5 — needs a second machine on the LAN",
-    "T07": "package 4/5 — needs a socket and gsp_shoot.py",
-    "T08": "package 4/5 — needs a socket and gsp_shoot.py",
-    "T09": "package 4/5 — needs a socket and gsp_shoot.py",
-    "T10": "package 4/5 — needs a socket and gsp_shoot.py",
+    "T06": "needs a real LAN and a second host; run by hand, see test_python_transport.py",
 }
 
 
@@ -54,13 +48,25 @@ def main() -> int:
 
     documented = set(re.findall(r"CT-([A-Z]\d+[a-z]?)\b", doc_path.read_text()))
     implemented: dict[str, str] = {}
-    for src in sorted((root / "tests").glob("test_*.c")):
-        for case in re.findall(r"GS_TEST\(CT_([A-Z]\d+[a-z]?)_", src.read_text()):
-            if case in implemented:
-                print(f"FAIL CT-{case} is defined twice "
-                      f"({implemented[case]} and {src.name})", file=sys.stderr)
-                return 1
-            implemented[case] = src.name
+
+    # ⚠ TWO LANGUAGES, ONE REGISTRY.  The C cases test the library, which owns
+    # no socket; the Python ones test a HOST driving it over a real one
+    # (conformance §3.8).  A case is a case wherever it lives, and counting only
+    # the C ones would report every CT-T row as missing the day it landed.
+    sources = [
+        (sorted((root / "tests").glob("test_*.c")), r"GS_TEST\(CT_([A-Z]\d+[a-z]?)_"),
+        (sorted((root / "tests").glob("test_python_*.py")),
+         r"^async def CT_([A-Z]\d+[a-z]?)_|^def CT_([A-Z]\d+[a-z]?)_"),
+    ]
+    for paths, pattern in sources:
+        for src in paths:
+            for match in re.finditer(pattern, src.read_text(), re.MULTILINE):
+                case = match.group(1) or match.group(2)
+                if case in implemented:
+                    print(f"FAIL CT-{case} is defined twice "
+                          f"({implemented[case]} and {src.name})", file=sys.stderr)
+                    return 1
+                implemented[case] = src.name
 
     failures = 0
 
