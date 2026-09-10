@@ -8,6 +8,12 @@ includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 Name: gspro
 Description: @PROJECT_DESCRIPTION@
 Version: @PROJECT_VERSION@
-Libs: -L${libdir} -lgspro
-Libs.private: -lm
+# ⚠ -lm is on the PUBLIC Libs line, not Libs.private, because libgspro ships as
+# a STATIC archive by default and a static consumer must resolve the library's
+# own math symbols (hypot/atan2/cos/sin/trunc, the spin derivation and the
+# shot-number check).  Libs.private is emitted only under `pkg-config --static`,
+# so a plain `--libs` there would leave them undefined — which is the exact
+# failure the install CI job caught the first time it ran.  It mirrors the
+# target's `PUBLIC m` on the CMake side.
+Libs: -L${libdir} -lgspro -lm
 Cflags: -I${includedir}
