@@ -71,12 +71,22 @@ against a real launch monitor becomes a replayable fixture.
 
 ### 1.1 What the library is for
 
-PinPoint Studio today reads a GCQuad's `LastShot.CSV`. Every other launch monitor on the market
-already ships, or has a community bridge that ships, a GSPro Open Connect client: Garmin R10,
-Rapsodo MLM2PRO, Square, SkyTrak, Uneekor, Bushnell, FlightScope, PiTrac. **Speaking the server
-side of one protocol reaches all of them**, with no per-device work, on any machine that can
-open a TCP port. That is why it is worth a library rather than a class inside one application:
-the same property is valuable to anyone building golf software that is not GSPro.
+PinPoint Studio today reads a GCQuad's `LastShot.CSV`. Many other launch monitors are reachable
+through a GSPro Open Connect **client somebody else has already written** — protocol §0's survey
+found seventeen, covering the Garmin R10 (five independent bridges), the Rapsodo MLM2PRO (two), a
+SkyTrak+ via OpenSkyPlus, a Foresight GC2's serial feed, a Swinglogic SLX proxy, and two DIY
+monitors that speak it natively (PiTrac, OpenFlight). **Speaking the server side of one protocol
+reaches all of them**, with no per-device work, on any machine that can open a TCP port. That is
+why it is worth a library rather than a class inside one application: the same property is
+valuable to anyone building golf software that is not GSPro.
+
+⚠ **It does not reach everything, and the exceptions are the ones a reader assumes.** Uneekor,
+Bushnell and Foresight ship no Open Connect client: their connectors are closed, speak their own
+vendors' protocols, and conformance §1 records them as unread for that reason. A Uneekor is
+reached only by a third-party bridge that watches Uneekor VIEW's shot folder or OCRs its screen
+— the same *shape* as PinPoint's GCQuad CSV connector rather than anything this library serves,
+and precisely why that connector still has to exist. Claiming otherwise oversells the library and
+sends somebody to buy the wrong device.
 
 ---
 

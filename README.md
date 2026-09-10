@@ -6,9 +6,19 @@ A **C11 library that plays the GSPro Connect role**: it listens for golf launch 
 speaking the GSPro Open Connect v1 protocol and surfaces every shot, heartbeat and status
 message they send, with **Python bindings** for driving one from Python.
 
-Almost every launch monitor on the market ships, or has a community bridge that ships, a GSPro
-Open Connect client — Garmin R10, Rapsodo MLM2PRO, Square, SkyTrak, Uneekor, Bushnell,
-FlightScope, PiTrac. Speaking the server side of that one protocol reaches all of them.
+**A launch monitor reached this way almost never speaks the protocol itself** — somebody wrote a
+bridge that speaks it on the device's behalf. The survey in [`docs/protocol.md`](docs/protocol.md)
+found seventeen: five independent bridges for the **Garmin R10** alone, two for the **Rapsodo
+MLM2PRO**, one for a **SkyTrak+** (via OpenSkyPlus), one for a **Foresight GC2**'s serial feed,
+one proxy for **Swinglogic SLX**, and two DIY monitors that speak it natively — **PiTrac** and
+**OpenFlight**. Speaking the server side of that one protocol reaches every one of them with no
+per-device work.
+
+⚠ **Uneekor, Bushnell and Foresight's own software do NOT speak Open Connect.** Their connectors
+are closed, talk to their vendors' own simulators, and were not read. A Uneekor is reachable only
+through a third-party bridge that watches Uneekor VIEW's shot folder or OCRs its screen — which is
+a different and much weaker proposition than a device with a client, and worth knowing before
+anyone buys one expecting this to work.
 
 It is **sans-I/O** — it owns no socket, thread, timer or clock. Your code accepts connections
 and reads bytes; the library returns decoded messages, the replies to write, and events. That
