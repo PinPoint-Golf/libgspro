@@ -26,14 +26,15 @@ extern "C" {
 /*
  * [GSP] writes it "0921".  Decimal 921; every client defaults to it.
  *
- * ⚠ IT IS A PRIVILEGED PORT EVERYWHERE EXCEPT WINDOWS.  921 is below 1024, so
- * macOS and Linux reserve it for root: an ordinary user's bind() returns EACCES,
- * and a host that reports that as "cannot bind" sends the user looking at their
- * launch monitor.  The vendor chose it on Windows, where no such rule exists.
- * The fix is a port above 1024 on both sides — every client examined has a port
- * setting — and NOT elevated privileges, because this listener is
- * unauthenticated by design (design §9.3).  Found by PinPoint Studio's connector
- * on macOS; design §6.1.
+ * ⚠ IT IS BELOW 1024, AND WHAT THAT COSTS DEPENDS ON THE ADDRESS.  Measured on
+ * macOS 27 as an ordinary user: 0.0.0.0:921 and [::]:921 BIND, while 127.0.0.1:921
+ * and a specific LAN address are refused with EACCES.  So the permissive wildcard
+ * bind works and the restrictive loopback-only one does not — the opposite of the
+ * rule most people carry.  Windows has no privileged-port rule at all, which is
+ * why the vendor could choose 921; Linux is not characterised here and this
+ * comment does not guess.  The fix is never elevated privileges — the listener is
+ * unauthenticated by design (design §9.3) — it is a wildcard bind or a port above
+ * 1024 on both sides.  design §6.1 has the measurements.
  */
 #define GSP_DEFAULT_PORT 921
 
