@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 Mark Liversedge
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # ⚠ THE BLOCKING JOB DOES NOT RUN THE CONFORMANCE CASES YET, AND SAYS SO.
+  # The suite was written before the library (design §11 package 1b), so while a
+  # source group is scaffolded those cases fail BY DESIGN.  A job that is always
+  # red teaches everyone to ignore it, so this one gates on what must pass
+  # today — the build itself on every platform, the sans-I/O purity gate, and
+  # the fixture cross-check — and `progress` below reports the rest.
+  #
+  # When the last source group lands, delete the `-L ready` filter here and this
+  # comment with it: the conformance suite becomes the gate.
+  # ---------------------------------------------------------------------------
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "linux-gcc",   os: ubuntu-latest,  cc: gcc,   extra: "" }
+          - { name: "linux-clang", os: ubuntu-latest,  cc: clang, extra: "" }
+          - { name: "linux-san",   os: ubuntu-latest,  cc: gcc,
+              extra: "-DGS_ENABLE_ASAN=ON -DGS_ENABLE_UBSAN=ON" }
+          - { name: "macos",       os: macos-latest,   cc: clang, extra: "" }
+          - { name: "windows",     os: windows-latest, cc: "",    extra: "" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug ${{ matrix.extra }}
+        env:
+          CC: ${{ matrix.cc }}
+      - name: Build
+        run: cmake --build build --config Debug --parallel
+      - name: Test (what must pass today)
+        run: ctest --test-dir build --build-config Debug -L ready --output-on-failure
+
+  # ---------------------------------------------------------------------------
+  # How much of the specification the library actually satisfies, as a number.
+  # Never blocks; the point is that the number goes up.
+  # ---------------------------------------------------------------------------
+  progress:
+    name: conformance progress
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+      - run: cmake --build build --parallel
+      - name: Count green cases
+        run: |
+          total=0; green=0
+          for t in build/tests/test_*; do
+            [ -x "$t" ] || continue
+            out=$("$t" 2>/dev/null || true)
+            total=$((total + $(printf '%s\n' "$out" | grep -c '^\[')))
+            green=$((green + $(printf '%s\n' "$out" | grep -c '^\[ ok \]')))
+          done
+          echo "## Conformance: $green / $total cases green" >> "$GITHUB_STEP_SUMMARY"
+          echo "conformance: $green / $total cases green"
+          if [ "$green" -eq "$total" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠ Every case is green — delete \`src/gs_unimplemented.c\`, replace the" \
+                 "discovered source list in CMakeLists.txt with a literal one, and make" \
+                 "the conformance suite the CI gate (drop \`-L ready\`)." >> "$GITHUB_STEP_SUMMARY"
+          fi

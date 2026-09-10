@@ -1,0 +1,12 @@
+{
+  "APIversion": "1",
+  "DeviceID": "GsPro4Osp",
+  "Units": "Yards",
+  "ShotNumber": 0,
+  "ShotDataOptions": {
+    "ContainsBallData": false,
+    "ContainsClubData": false,
+    "LaunchMonitorIsReady": true,
+    "IsHeartBeat": true
+  }
+}

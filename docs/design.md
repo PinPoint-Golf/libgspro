@@ -834,11 +834,18 @@ The public headers under `include/gspro/` are the second, and are written *from*
 so that the API is reviewable before any of it runs. Everything below is sequence, not
 progress.
 
+⚠ **The conformance suite came before the library, deliberately** (package 1b below). Every
+package after it is finished when its `CT-` rows go green, and `src/gs_unimplemented.c` is
+what lets the suite build and run in the meantime — the configure line prints which groups are
+still standing in. **When the last group lands, delete that file and replace the discovered
+source list in `CMakeLists.txt` with a literal one.**
+
 | # | Package | Delivers | Depends on |
 |---|---|---|---|
 | 1 | Headers | `include/gspro/*.h`, exactly the API of Appendix A, compiling under `-Werror` with an empty `src/` | — |
-| 2 | Framer + decoder | `src/gs_frame.c`, `src/gs_decode.c`, `src/gs_encode.c`; the fixtures of §10.2; fuzz target | 1 |
-| 3 | Server | `src/gs_server.c`: connections, replies, player info, events, idle alarm; purity test | 2 |
+| 1b | **Conformance suite** ✅ | `tests/` — 103 cases, 23 byte-exact fixtures, the sans-I/O gate, an independent Python fixture cross-check, and the CMake that runs them all red | 1 |
+| 2 | Framer + decoder | `src/gs_frame.c`, `src/gs_decode.c`, `src/gs_encode.c`, `src/gs_misc.c` — turns CT-F, CT-D, CT-K and the API family green | 1b |
+| 3 | Server | `src/gs_server.c`: connections, replies, player info, session state, events, idle alarm — turns CT-R, CT-P, CT-C and CT-X green | 2 |
 | 4 | FFI + Python | `gspro_ffi` target, `python/gspro/`, ABI table and tests, `gsp_listen.py`, `gsp_shoot.py`, asyncio transport | 3 |
 | 5 | Reference net transport + tool | `gspro_net` (POSIX/Winsock), `gsplisten` CLI | 3 |
 | 6 | Wire log + record | `poll_wire`, `gspro_record`, `.gswire`, replay | 3 |

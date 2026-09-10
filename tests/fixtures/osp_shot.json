@@ -1,0 +1,23 @@
+{
+  "APIversion": "1",
+  "DeviceID": "GsPro4Osp",
+  "Units": "Yards",
+  "ShotNumber": 12,
+  "BallData": {
+    "Speed": 138.24,
+    "SpinAxis": -2.9,
+    "TotalSpin": 2810.0,
+    "BackSpin": 2806.4,
+    "SideSpin": -142.2,
+    "HLA": 0.7,
+    "VLA": 13.9
+  },
+  "ClubData": {
+    "Speed": 101.86
+  },
+  "ShotDataOptions": {
+    "ContainsBallData": true,
+    "ContainsClubData": true,
+    "IsHeartBeat": false
+  }
+}

@@ -1,0 +1,15 @@
+{
+"DeviceID": "GSPro LM 1.1",  			//required - unqiue per launch monitor / prooject type
+"Units": "Yards",						//default yards
+"ShotNumber": 13,						//required - auto increment from LM
+"APIversion": "1",						//required - "1" is current version
+"BallData": {		
+	"Speed": 147.5,						//required
+	"HLA": 2.3,							//required
+	"VLA": 14.3						//required
+},
+"ShotDataOptions": {
+	"ContainsBallData": true,			//required
+	"ContainsClubData": false			//required
+}
+	}

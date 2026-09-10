@@ -1,0 +1,1 @@
+{"DeviceID": "Rapsodo MLM2PRO", "Units": "Yards", "ShotNumber": 99, "APIversion": "1", "ShotDataOptions": {"ContainsBallData": true, "ContainsClubData": true, "LaunchMonitorIsReady": true, "LaunchMonitorBallDetected": true, "IsHeartBeat": false}, "BallData": {"Speed": 6.4, "TotalSpin": 120.0, "SpinAxis": 0, "HLA": -1.2, "VLA": 0}, "ClubData": {"Speed": 6.4}}

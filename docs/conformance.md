@@ -13,6 +13,19 @@ that when a client is dropped or a new one appears the suite can be re-derived r
 re-argued. ⚠ **No case here has yet been run against a real launch monitor**; the matrix is
 read from source, and design §11's package 7 is where it meets hardware.
 
+**The suite is built and runs today.** `tests/` holds **103 cases** across eight binaries, plus the sans-I/O gate and a Python fixture cross-check that needs no C at
+all. ⚠ While a source group is missing, `src/gs_unimplemented.c` supplies its symbols and the
+cases touching it FAIL — deliberately, so that the suite is a specification which can be run
+rather than one that can only be read:
+
+```sh
+cmake --preset dev && cmake --build --preset dev && ctest --preset dev
+cmake --preset san && cmake --build --preset san && ctest --preset san   # CT-D24, CT-X02
+```
+
+The configure line names which groups are still scaffolded, and so does every test binary's
+first line of output.
+
 ---
 
 ## 1. The clients
@@ -280,6 +293,34 @@ One file per row, hand-written from the source's serialisation code — not copi
 | `gc2_shot.json` | serial in DeviceID, total and pair | D18, D14 |
 | `sb_strings.json` | string-typed values, `Apiversion` | D09 |
 | `slx_zero_speed.json` | a "shot" with Speed 0 | D12 |
+| `gsp_full_commented.json` | the vendor's example **with its `//` comments**, which is what somebody pastes | X08 |
+
+Provenance for each, and the byte-level details a re-generation would get wrong, are in
+[`../tests/fixtures/README.md`](../tests/fixtures/README.md).
+
+### 4.1 Cases beyond the tables above
+
+Written while building the suite, each covering a hazard the tables imply but do not name.
+They carry a letter suffix so the numbered rows keep their meaning.
+
+| Case | What it pins | Because |
+|---|---|---|
+| CT-F10b | whitespace alone is pending, never garbage | [MLM]'s splitter allows spaces between objects |
+| CT-D07b | a null BOOLEAN in `ShotDataOptions` is absence | [R10] writes `"IsHeartBeat": null` |
+| CT-D08b | an unknown key whose value is a nested object or array is skipped **whole** | a decoder that resumed inside it would read the nested members as top-level keys |
+| CT-D21 | absent `Units` is UNKNOWN and not a finding | [TL] sends no `Units` key at all |
+| CT-D23b | missing required root fields are delivered and flagged, never refused | design §4.5 |
+| CT-K03b | a heartbeat carrying full `BallData`/`ClubData` objects | [PIT] and [OF] both do |
+| CT-K05b | the server raises `CLIENT_STATE` from a heartbeat, and only on change | [OSP] carries ready on a heartbeat; [FB] repeats it every 5 s |
+| CT-K08b | `ContainsClubData: true` is not evidence the numbers are real | [MLM] sets it on every shot |
+| CT-X02b | the noise sweep through a server, which adds the framer's state | |
+| CT-X08 | the vendor's own commented example is refused cleanly | it is not JSON, and it is the first thing anyone copies |
+| CT-X09 | NULL and zero-length at every entry point | the floor beneath every other case |
+| API-* | the vocabulary tables, the redaction sweep, the documented defaults | a club code that maps to its neighbour, or an event whose formatter forgot to redact, fails silently |
+
+⚠ **The redaction sweep (`API_no_event_leaks_an_identifier_when_redacted`) formats EVERY event
+type with an identifier in every field that can hold one.** design §9.2: a logging path that
+only redacts the events a developer happened to hit is one that leaks during an incident.
 
 ---
 

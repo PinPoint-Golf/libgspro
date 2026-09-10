@@ -15,9 +15,18 @@ and reads bytes; the library returns decoded messages, the replies to write, and
 lets it sit inside a Qt application on `QTcpServer`, a Python program on `asyncio`, or a POSIX
 `select` loop, and lets it be tested without a socket.
 
-⚠ **Status: designed, not yet built.** The protocol reference, the design and the public
-headers are complete and are the first deliverable; nothing under `src/` exists yet. See
-[`docs/design.md` §11](docs/design.md#11-implementation-plan-and-status) for the sequence.
+⚠ **Status: specified and tested, not yet implemented.** The protocol reference, the design,
+the public headers and the **conformance suite** are complete; nothing under `src/` implements
+them yet. The suite builds and runs today against a scaffold, so the specification is
+something you can execute rather than only read — 103 cases and 23 byte-exact fixtures taken
+from sixteen real launch-monitor clients:
+
+```sh
+cmake --preset dev && cmake --build --preset dev && ctest --preset dev
+```
+
+Most cases fail, deliberately. See [`docs/design.md` §11](docs/design.md#11-implementation-plan-and-status)
+for the sequence that turns them green.
 
 ## Documentation
 
@@ -27,8 +36,12 @@ headers are complete and are the first deliverable; nothing under `src/` exists 
   work against GSPro, and one independent server. Section §11 lists what remains unknown and
   how each unknown will be closed.
 - [`docs/design.md`](docs/design.md) — how the library answers that protocol, and why.
+- [`docs/conformance.md`](docs/conformance.md) — what every known client puts on the wire and
+  expects back, and the numbered cases that follow from it.
 - [`include/gspro/`](include/gspro/) — the public API, written from the design. Start with
   [`gspro.h`](include/gspro/gspro.h), then [`server.h`](include/gspro/server.h).
+- [`tests/`](tests/) — the conformance suite, and [`tests/fixtures/`](tests/fixtures/) — one
+  byte-exact message per client, with provenance.
 
 ## The integration, in one screen
 
@@ -56,11 +69,21 @@ request and event carries it.
 
 ## Building
 
-Not yet. When it exists: a C11 compiler and CMake ≥ 3.16, no dependencies, embedded with
+A C11 compiler and CMake ≥ 3.16. No dependencies.
+
+```sh
+cmake --preset dev && cmake --build --preset dev && ctest --preset dev
+```
+
+Presets `dev`, `san`, `cov`, `rel` and `release` wrap the usual configurations. Embedded with
 `add_subdirectory` or `FetchContent` exactly as [libwrist](../libwrist) is, and consumed as
-`#include <gspro/gspro.h>` linking the `gspro` target. The same `GS_BUILD_*` options, the same
-`dev` / `san` / `cov` / `rel` / `release` presets, the same purity test that fails the build if
-the core ever references a socket, a thread, a timer, a clock or a file.
+`#include <gspro/gspro.h>` linking the `gspro` target. Adding it to a project changes nothing
+about that project: the tests, the FFI object, `-Werror` and the install rules all default to
+ON when this is the top-level project and OFF when it is not (`GS_BUILD_TESTS`,
+`GS_BUILD_FFI`, `GS_WERROR`, `GS_INSTALL`).
+
+`tests/purity.cmake` fails the build if the core ever references a socket, a thread, a timer,
+a clock or a file — the property that makes the library embeddable at all.
 
 ## Python
 

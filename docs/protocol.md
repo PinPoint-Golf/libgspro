@@ -119,14 +119,14 @@ serialisation and nothing else:
 - [GC2]: `serde_json::to_string` then `write_all` — compact, no delimiter.
 - [TG]: `client.write(JSON.stringify(gsprodata))`.
 
-- [PIT]: Boost `write_some` of a pretty-printed object (Boost's JSON writer indents) with numbers un-quoted by a regex afterwards.
+- [PIT]: Boost `write_some` of a pretty-printed object (Boost's JSON writer indents) with numbers un-quoted by a regex afterwards. ⚠ **And Boost's `write_json` appends a newline of its own**, so PiTrac delimits without its author having chosen to — inferred from Boost's implementation rather than from a capture.
 - [OF]: `json.dumps(..., separators=(",", ":"))` — compact.
 - [OB]'s bridge: `sock.write(JSON.stringify(msg))` — compact.
 - ⚠ [FB]: `conn.Write(append(data, '\n'))` — **compact with a trailing newline**.
 - ⚠ [GG]: its contract test asserts "forwarded GSPro payload should be newline-delimited".
 
-So **two of fourteen clients append a newline** and twelve do not. A server must accept both,
-which the whitespace rule below gives for free, and must never *require* one.
+So **three of sixteen clients append a newline** and thirteen do not. A server must accept
+both, which the whitespace rule below gives for free, and must never *require* one.
 
 **Consequently a TCP read may contain a fraction of a message, exactly one message, or several
 concatenated.** Both are observed in practice on the *client* side reading GSPro's replies, and
@@ -166,7 +166,7 @@ verbatim. This section states what each part means and what clients actually put
 | Key | Type | Required | Meaning | Source |
 |---|---|---|---|---|
 | `DeviceID` | string | **required** | "unqiue per launch monitor / prooject type" [GSP, sic]. A free-text name of the *software* sending, not a serial number: `"GSPro LM 1.1"` [GSP] — **copied verbatim by [FB]**, so the vendor's example string is a real value on the wire — `"GSPRO-R10"` [R10], `"Garmin R10"` [GG], `"GsPro4Osp"` [OSP], `"OpenFlight"` [OF], `"PiTrac LM 0.1"` [PIT], `"Uneekor VIEW (Open-Birdie watch)"` [OB], user-configurable in [MLM] and [TL]. ⚠ [GC2] sends `"Foresight GC2 (<serial number>)"` — a **hardware serial** inside the label, so the field can identify a specific unit and is treated as an identifier (design §9.2) | [GSP] |
-| `Units` | string | optional, "default yards" | `"Yards"` or `"Meters"` — the only two values any source knows: [TNB] enumerates exactly these two, and [GSP] shows `"Yards"`. [TNB]'s annotated redraft marks this field "optional - default yards". [OCR] takes it from a user setting named `METRIC` whose default is `"Yards"`, and [OF] has a `units` parameter its tests exercise with `"Meters"`, so a connector *can* send it; none was observed defaulting to it. ⚠ What the field *governs* is not stated by anyone; see §3.6 | [GSP] [TNB] [OCR] |
+| `Units` | string | optional, "default yards" | `"Yards"` or `"Meters"` — the only two values any source knows: [TNB] enumerates exactly these two, and [GSP] shows `"Yards"`. [TNB]'s annotated redraft marks this field "optional - default yards". [OCR] takes it from a user setting named `METRIC` whose default is `"Yards"`, and [OF] has a `units` parameter its tests exercise with `"Meters"`, so a connector *can* send it; none was observed defaulting to it. ⚠ **And one client sends no `Units` key at all**: [TL]'s payload reads `Units: this.unit` where the constructor set `this.units`, so the value is `undefined` and `JSON.stringify` drops the key. Absent-Units is a real client, not a hypothetical. ⚠ What the field *governs* is not stated by anyone; see §3.6 | [GSP] [TNB] [OCR] [TL] |
 | `ShotNumber` | number | **required** | "auto increment from LM" [GSP]. ⚠ Observed as a JSON *float* (`13.0`) in [OSG]'s fixtures, as `0` for heartbeats in [R10], and starting from 1 in [MLM] and [TL]. A server must accept an integer-valued float. See §4.3 | [GSP] |
 | `APIversion` | string | **required** | `"1" is current version` [GSP]. ⚠ Spelled with a lower-case `v`. [R10]'s C# property is `APIVersion`, serialised with the default (unchanged) casing, so **at least one widely used client sends the key as `APIVersion`**; [SB] sends `Apiversion`. A server must match keys case-insensitively | [GSP] [R10] [SB] |
 | `BallData` | object | when `ContainsBallData` | §3.2 | [GSP] |
@@ -201,6 +201,7 @@ in §3.5.
 - [FB] marks `BackSpin`, `SideSpin` and `CarryDistance` `omitempty`, so a zero there is **absent** rather than sent — the third convention, after "send zero" and "send null-as-absent".
 - [OB]'s bridge sends **`"ClubData": null`** — a JSON null where an object is expected — and an extra top-level key `ClubName` carrying the device's club as text. Both must be tolerated: a null object is "absent", and unknown keys are skipped (§9.7).
 - [SB] sends every number and boolean **as a JSON string** (`"Speed": "147.5"`, `"ContainsBallData": "true"`). It is not known to work against GSPro, so this is a tolerance a server may choose, not one it needs; `libgspro` coerces and flags it (design §4.5).
+- ⚠ **And one client sends every value as a JSON string** — [SB], `{"Speed": "147.5"}` — which is not known to work against GSPro and is cheap to accept anyway.
 - ⚠ **A `0.0` is therefore ambiguous**: it may be a measurement or a placeholder for "not measured". The protocol has no null and no absent-means-unknown convention that clients follow. `libgspro` surfaces presence *and* value and leaves the interpretation to the application (design §4.3).
 
 **Deriving the spin pair from the total, and back.** Two clients that hold one representation
@@ -580,6 +581,16 @@ flags false, classify the message as status, and flag it.
 8. Surface ready / ball-detected / heartbeat as status, not shots (§3.4).
 9. Send `{"Code":201,...,"Player":{...}}` unsolicited whenever the application's club, handedness or distance changes, and optionally on connect (§5.2).
 10. Send `{"Code":202,"Message":"GSPro ready"}` when a session starts and `{"Code":203,"Message":"GSPro round ended"}` when it ends, with those exact strings (§5.1); never require a reply to anything (§8).
+
+---
+
+## 10.1 The checklist as executable cases
+
+Every rule above is a numbered case in [`conformance.md`](conformance.md) §3 and a test in
+`tests/`. ⚠ **The fixtures are the evidence and the cases are the claim**: `tests/fixtures/`
+holds one byte-exact message per client in this survey, so "a server must tolerate X" is
+never an assertion in prose alone — it is a file somebody can read and a case that fails when
+the tolerance goes away.
 
 ---
 

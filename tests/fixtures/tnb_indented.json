@@ -1,0 +1,20 @@
+{
+  "DeviceID": "GSProInterface",
+  "Units": "Yards",
+  "ShotNumber": 1,
+  "APIversion": "1",
+  "BallData": {
+    "Speed": 147.5,
+    "SpinAxis": -13.2,
+    "TotalSpin": 3250.0,
+    "HLA": 2.3,
+    "VLA": 14.3
+  },
+  "ShotDataOptions": {
+    "ContainsBallData": true,
+    "ContainsClubData": false,
+    "LaunchMonitorBallDetected": true,
+    "LaunchMonitorIsReady": true,
+    "IsHeartBeat": false
+  }
+}

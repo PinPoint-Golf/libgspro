@@ -1,0 +1,61 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "vendor": {
+    "spdx": {
+      "SPDX-License-Identifier": "MIT",
+      "copyright": "Copyright (C) 2026 Mark Liversedge",
+      "note": "JSON carries no comment syntax; `vendor` is the presets schema's own escape hatch for data CMake must ignore."
+    }
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Debug, warnings as errors",
+      "binaryDir": "${sourceDir}/build/dev",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "san",
+      "displayName": "Debug + ASan + UBSan",
+      "description": "The configuration the decoder fuzz cases (CT-X02) and the truncation sweep (CT-D24) are worth running under: every byte on this socket is untrusted.",
+      "binaryDir": "${sourceDir}/build/san",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "GS_ENABLE_ASAN": "ON",
+        "GS_ENABLE_UBSAN": "ON"
+      }
+    },
+    {
+      "name": "cov",
+      "displayName": "Debug + gcov",
+      "binaryDir": "${sourceDir}/build/cov",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "GS_ENABLE_COVERAGE": "ON" }
+    },
+    {
+      "name": "rel",
+      "displayName": "RelWithDebInfo — optimised, KEEPS debug info",
+      "description": "The one to build when a release-mode fault needs a symbolised stack. Not the artefact to ship — that is `release`.",
+      "binaryDir": "${sourceDir}/build/rel",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "release",
+      "displayName": "Release — optimised, NO debug info",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev", "jobs": 4 },
+    { "name": "san", "configurePreset": "san", "jobs": 4 },
+    { "name": "cov", "configurePreset": "cov", "jobs": 4 },
+    { "name": "rel", "configurePreset": "rel", "jobs": 4 },
+    { "name": "release", "configurePreset": "release", "jobs": 4 }
+  ],
+  "testPresets": [
+    { "name": "dev", "configurePreset": "dev", "output": { "outputOnFailure": true } },
+    { "name": "san", "configurePreset": "san", "output": { "outputOnFailure": true } },
+    { "name": "cov", "configurePreset": "cov", "output": { "outputOnFailure": true } }
+  ]
+}
