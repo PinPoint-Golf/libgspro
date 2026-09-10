@@ -13,18 +13,19 @@ that when a client is dropped or a new one appears the suite can be re-derived r
 re-argued. ⚠ **No case here has yet been run against a real launch monitor**; the matrix is
 read from source, and design §11's package 7 is where it meets hardware.
 
-**The suite is built and runs today.** `tests/` holds **103 cases** across eight binaries, plus the sans-I/O gate and a Python fixture cross-check that needs no C at
-all. ⚠ While a source group is missing, `src/gs_unimplemented.c` supplies its symbols and the
-cases touching it FAIL — deliberately, so that the suite is a specification which can be run
-rather than one that can only be read:
+**The suite is built, runs, and is green.** `tests/` holds **103 cases** across eight binaries, plus the sans-I/O gate and a Python fixture cross-check that needs no C at
+all. It was written before the library, so that the specification was one that could be run
+rather than one that could only be read; every case now passes against the core, in both
+configurations:
 
 ```sh
 cmake --preset dev && cmake --build --preset dev && ctest --preset dev
 cmake --preset san && cmake --build --preset san && ctest --preset san   # CT-D24, CT-X02
 ```
 
-The configure line names which groups are still scaffolded, and so does every test binary's
-first line of output.
+⚠ **Green here is not the same as correct.** Every case is read from a client's source, not
+from a wire, so the suite says the library agrees with what those clients are written to send —
+design §11's package 7 is where that meets hardware.
 
 ---
 

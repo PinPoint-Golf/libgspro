@@ -829,23 +829,25 @@ listener with `asyncio` and drives `gsp_shoot.py` at it.
 
 ## 11. Implementation plan and status
 
-⚠ **Status: designed, not built.** This document and `protocol.md` are the first deliverable.
-The public headers under `include/gspro/` are the second, and are written *from* this design
-so that the API is reviewable before any of it runs. Everything below is sequence, not
-progress.
+⚠ **Status: the core is built and the whole conformance suite is green** — 103 cases, clean
+under `--preset dev` and `--preset san`. ⚠ **It has still never met a launch monitor**, which
+is package 7 and the only thing that can close protocol §11's unknowns. This document and
+`protocol.md` were the first deliverable and the public headers the second, written *from* this
+design so that the API was reviewable before any of it ran.
 
 ⚠ **The conformance suite came before the library, deliberately** (package 1b below). Every
-package after it is finished when its `CT-` rows go green, and `src/gs_unimplemented.c` is
-what lets the suite build and run in the meantime — the configure line prints which groups are
-still standing in. **When the last group lands, delete that file and replace the discovered
-source list in `CMakeLists.txt` with a literal one.**
+package after it is finished when its `CT-` rows go green, and `src/gs_unimplemented.c` was
+what let the suite build and run in the meantime. That file was deleted and the discovered
+source list in `CMakeLists.txt` replaced with a literal one when package 3 landed — a
+discovered list silently builds yesterday's library, because CMake does not re-run when a file
+appears.
 
 | # | Package | Delivers | Depends on |
 |---|---|---|---|
 | 1 | Headers | `include/gspro/*.h`, exactly the API of Appendix A, compiling under `-Werror` with an empty `src/` | — |
 | 1b | **Conformance suite** ✅ | `tests/` — 103 cases, 23 byte-exact fixtures, the sans-I/O gate, an independent Python fixture cross-check, and the CMake that runs them all red | 1 |
-| 2 | Framer + decoder | `src/gs_frame.c`, `src/gs_decode.c`, `src/gs_encode.c`, `src/gs_misc.c` — turns CT-F, CT-D, CT-K and the API family green | 1b |
-| 3 | Server | `src/gs_server.c`: connections, replies, player info, session state, events, idle alarm — turns CT-R, CT-P, CT-C and CT-X green | 2 |
+| 2 | **Framer + decoder** ✅ | `src/gs_frame.c`, `src/gs_decode.c`, `src/gs_encode.c`, `src/gs_misc.c` — turns CT-D, CT-K and the API family green, and CT-F apart from the two rows that drive a server | 1b |
+| 3 | **Server** ✅ | `src/gs_server.c`: connections, replies, player info, session state, events, idle alarm — turns CT-R, CT-P, CT-C, CT-X and the rest of CT-F green | 2 |
 | 4 | FFI + Python | `gspro_ffi` target, `python/gspro/`, ABI table and tests, `gsp_listen.py`, `gsp_shoot.py`, asyncio transport | 3 |
 | 5 | Reference net transport + tool | `gspro_net` (POSIX/Winsock), `gsplisten` CLI | 3 |
 | 6 | Wire log + record | `poll_wire`, `gspro_record`, `.gswire`, replay | 3 |
@@ -871,4 +873,6 @@ answering U1–U10 rather than debugging framing.
 | `gspro/event.h` | `gsp_event` and its payloads, `gsp_event_format()`, `gsp_event_is_sensitive()` |
 | `gspro/server.h` | The server, the threading contract, the transport contract, policy, config, rings, `gsp_wire_chunk` |
 
-Internal, reachable from tests: `src/gs_frame.h`, `src/gs_json.h`.
+Internal, reachable from tests: `src/gs_frame.h` (the incremental framer the server keeps per
+connection, and which `gsp_frame_find()` drives from a clean state so the stateless and
+incremental halves cannot disagree), `src/gs_json.h` (the bounded reader).

@@ -31,9 +31,10 @@ static inline gsp_time_us gs_advance(gsp_time_us by_us)
 }
 
 /* Create with the defaults, or with a config the caller has adjusted.  Returns
- * NULL if the library refuses, which every caller must tolerate: while
- * src/gs_server.c does not exist the scaffold refuses everything, and a case
- * that dereferenced NULL would abort the whole binary and hide the rest. */
+ * NULL if the library refuses, which every caller must tolerate: a case that
+ * dereferenced NULL would abort the whole binary and hide every case after it.
+ * That mattered most while src/gs_server.c did not yet exist and a scaffold
+ * refused every create; it still guards a config a future case gets wrong. */
 static inline gsp_server *gs_srv_create(const gsp_server_config *cfg)
 {
     gsp_server_config local;

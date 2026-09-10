@@ -15,18 +15,22 @@ and reads bytes; the library returns decoded messages, the replies to write, and
 lets it sit inside a Qt application on `QTcpServer`, a Python program on `asyncio`, or a POSIX
 `select` loop, and lets it be tested without a socket.
 
-⚠ **Status: specified and tested, not yet implemented.** The protocol reference, the design,
-the public headers and the **conformance suite** are complete; nothing under `src/` implements
-them yet. The suite builds and runs today against a scaffold, so the specification is
-something you can execute rather than only read — 103 cases and 23 byte-exact fixtures taken
-from sixteen real launch-monitor clients:
+⚠ **Status: the core is built and the conformance suite is green — but it has never met a real
+launch monitor.** The framer, decoder, encoder and server are implemented and all **103 cases**
+pass, clean under AddressSanitizer and UndefinedBehaviorSanitizer. Those cases and the 23
+byte-exact fixtures behind them are read from the source of sixteen real launch-monitor
+clients, not from a wire, so green means the library agrees with what those clients are
+*written* to send:
 
 ```sh
 cmake --preset dev && cmake --build --preset dev && ctest --preset dev
+cmake --preset san && cmake --build --preset san && ctest --preset san
 ```
 
-Most cases fail, deliberately. See [`docs/design.md` §11](docs/design.md#11-implementation-plan-and-status)
-for the sequence that turns them green.
+Still to come: the FFI and Python binding, the reference socket transport and CLI, the wire
+log, and the first session against real hardware — which is the one that can close the open
+questions in [`docs/protocol.md` §11](docs/protocol.md). See
+[`docs/design.md` §11](docs/design.md#11-implementation-plan-and-status) for the sequence.
 
 ## Documentation
 

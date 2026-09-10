@@ -29,20 +29,16 @@ foreach(src ${GS_TEST_SOURCES})
     # fixtures would be a suite that skipped rather than passed.
     target_compile_definitions(${name} PRIVATE
         GS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-    if(GS_SCAFFOLDED)
-        string(REPLACE ";" " " _gs_txt "${GS_SCAFFOLDED}")
-        target_compile_definitions(${name} PRIVATE GS_SCAFFOLDED_GROUPS="${_gs_txt}")
-    endif()
     # ⚠ NO -Wno-unused-function HERE, DELIBERATELY.  The harness leaves helpers
     # unused per translation unit, but a suppression added to the target lands
     # BEFORE gs_build_flags' -Wall in the command line and is undone by it.  The
     # helpers are `static inline` instead, which no compiler warns about.
     add_test(NAME ${name} COMMAND ${name})
-    # ⚠ LABELS EXIST SO CI CAN BLOCK ON WHAT SHOULD PASS TODAY.  While a source
-    # group is scaffolded the conformance cases are EXPECTED to fail, and a job
-    # that is always red teaches everyone to ignore it.  `ctest -L ready` runs
-    # only what does not need the library; the full run is a progress report
-    # until the last group lands, and becomes the gate the moment it does.
+    # ⚠ THE FULL RUN IS NOW THE GATE.  While a source group was scaffolded the
+    # conformance cases were expected to fail and `ctest -L ready` ran only what
+    # did not need the library.  Every group has landed, so `conformance` is
+    # green or the library is broken; the `ready` label stays because the purity
+    # and cross-check tests need no C at all.
     set_tests_properties(${name} PROPERTIES TIMEOUT 120 LABELS "conformance")
 endforeach()
 

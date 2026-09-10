@@ -8,15 +8,11 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # ⚠ THE BLOCKING JOB DOES NOT RUN THE CONFORMANCE CASES YET, AND SAYS SO.
-  # The suite was written before the library (design §11 package 1b), so while a
-  # source group is scaffolded those cases fail BY DESIGN.  A job that is always
-  # red teaches everyone to ignore it, so this one gates on what must pass
-  # today — the build itself on every platform, the sans-I/O purity gate, and
-  # the fixture cross-check — and `progress` below reports the rest.
-  #
-  # When the last source group lands, delete the `-L ready` filter here and this
-  # comment with it: the conformance suite becomes the gate.
+  # ⚠ THE CONFORMANCE SUITE IS THE GATE.  It ran behind a `-L ready` filter
+  # while the library was being written, because the suite came first (design
+  # §11 package 1b) and a job that is always red teaches everyone to ignore it.
+  # Every source group has landed, so all 103 cases run on every platform and a
+  # red build is a real regression.
   # ---------------------------------------------------------------------------
   build:
     name: ${{ matrix.name }}
@@ -39,12 +35,14 @@ jobs:
           CC: ${{ matrix.cc }}
       - name: Build
         run: cmake --build build --config Debug --parallel
-      - name: Test (what must pass today)
-        run: ctest --test-dir build --build-config Debug -L ready --output-on-failure
+      - name: Test
+        run: ctest --test-dir build --build-config Debug --output-on-failure
 
   # ---------------------------------------------------------------------------
-  # How much of the specification the library actually satisfies, as a number.
-  # Never blocks; the point is that the number goes up.
+  # How much of the specification the library satisfies, as a number in the run
+  # summary.  Never blocks — `build` above is the gate — but a case count that
+  # quietly falls is visible here even when every binary still exits 0, which is
+  # what a retired case looks like.
   # ---------------------------------------------------------------------------
   progress:
     name: conformance progress
@@ -72,11 +70,9 @@ jobs:
           echo "conformance: $green / $total cases green"
           {
             echo "## Conformance: $green / $total cases green"
-            if [ "$total" -gt 0 ] && [ "$green" -eq "$total" ]; then
+            if [ "$total" -gt 0 ] && [ "$green" -lt "$total" ]; then
               echo
-              echo "⚠ Every case is green. Delete \`src/gs_unimplemented.c\`, replace the"
-              echo "discovered source list in CMakeLists.txt with a literal one, and make"
-              echo "the conformance suite the CI gate by dropping \`-L ready\`."
+              echo "⚠ $((total - green)) case(s) failing — see the \`build\` job."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           exit 0

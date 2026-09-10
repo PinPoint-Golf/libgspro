@@ -100,48 +100,30 @@ if(GS_ENABLE_COVERAGE)
 endif()
 
 # ---------------------------------------------------------------------------
-# Sources, and what is still scaffolded
+# Sources
 #
-# ⚠ THE SOURCE LIST IS DISCOVERED, NOT DECLARED, AND THAT IS DELIBERATE HERE
-# AND NOWHERE ELSE.  The conformance suite (docs/conformance.md) was written
-# before the library, so the build has to work with NONE of the five source
-# files present, with all five, and with any subset in between — that is the
-# whole shape of design §11's package sequence.  src/gs_unimplemented.c
-# supplies whatever is missing, guarded by the GS_HAVE_* macros set below, so a
-# package lands as one new file with no edit to this list and no duplicate
-# symbol.
+# ⚠ A LITERAL LIST, AND IT BECAME ONE THE DAY THE LAST GROUP LANDED.  While the
+# conformance suite ran ahead of the library (design §11's packages 1b to 3)
+# this list was DISCOVERED from the files on disk, so a package could land as
+# one new file and src/gs_unimplemented.c could stand in for whatever was still
+# missing.  That was tolerable only while the file set was the thing being
+# tracked: CMake does not re-run when a file appears, so a discovered list
+# silently builds yesterday's library — which is exactly what it did on the
+# first sanitizer run after gs_server.c landed.
 #
-# ⚠ WHEN THE LAST GROUP LANDS, replace this block with a plain literal list and
-# delete src/gs_unimplemented.c.  A globbed source list is a liability in a
-# shipping library — CMake does not re-run when a file appears — and it is only
-# tolerable while the file set is the thing being tracked.
+# The five groups, and what each answers for:
+#   gs_frame.c    the string-aware framer            design §5.3
+#   gs_decode.c   the bounded JSON reader            design §5.4
+#   gs_encode.c   the only path bytes leave by       design §9.1
+#   gs_misc.c     vocabulary, derivation, formatters design §4
+#   gs_server.c   connections, replies, events       design §5
 # ---------------------------------------------------------------------------
-set(GS_SOURCE_GROUPS frame decode encode misc server)
-set(GS_CORE_SOURCES "")
-set(GS_SCAFFOLD_DEFS "")
-set(GS_SCAFFOLDED "")
-
-foreach(_grp IN LISTS GS_SOURCE_GROUPS)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/gs_${_grp}.c")
-        list(APPEND GS_CORE_SOURCES "src/gs_${_grp}.c")
-        string(TOUPPER "${_grp}" _GRP)
-        list(APPEND GS_SCAFFOLD_DEFS "GS_HAVE_${_GRP}=1")
-    else()
-        string(TOUPPER "${_grp}" _GRP)
-        list(APPEND GS_SCAFFOLDED "${_GRP}")
-    endif()
-endforeach()
-
-# Always last, so a real definition is found first by a reader.
-list(APPEND GS_CORE_SOURCES "src/gs_unimplemented.c")
-
-if(GS_SCAFFOLDED)
-    string(REPLACE ";" " " _gs_scaffolded_text "${GS_SCAFFOLDED}")
-    message(STATUS "libgspro: NOT IMPLEMENTED YET — ${_gs_scaffolded_text}")
-    message(STATUS "libgspro: the conformance suite will run and FAIL those cases, by design")
-else()
-    message(STATUS "libgspro: every source group present; delete src/gs_unimplemented.c")
-endif()
+set(GS_CORE_SOURCES
+    src/gs_frame.c
+    src/gs_decode.c
+    src/gs_encode.c
+    src/gs_misc.c
+    src/gs_server.c)
 
 add_library(gspro ${GS_CORE_SOURCES})
 add_library(gspro::gspro ALIAS gspro)
@@ -161,7 +143,7 @@ set_target_properties(gspro PROPERTIES
     C_VISIBILITY_PRESET hidden
     POSITION_INDEPENDENT_CODE ON)
 
-target_compile_definitions(gspro PRIVATE GSP_BUILDING_LIBRARY=1 ${GS_SCAFFOLD_DEFS})
+target_compile_definitions(gspro PRIVATE GSP_BUILDING_LIBRARY=1)
 if(BUILD_SHARED_LIBS)
     target_compile_definitions(gspro PUBLIC GSP_SHARED=1)
 endif()
@@ -192,7 +174,7 @@ if(GS_BUILD_FFI)
     # GSP_BUILDING_LIBRARY are both set (include/gspro/types.h).  Miss one and
     # the object exports nothing, which fails at dlopen rather than at build.
     target_compile_definitions(gspro_ffi PRIVATE
-        GSP_BUILDING_LIBRARY=1 GSP_SHARED=1 ${GS_SCAFFOLD_DEFS})
+        GSP_BUILDING_LIBRARY=1 GSP_SHARED=1)
     set_target_properties(gspro_ffi PROPERTIES
         VERSION   ${PROJECT_VERSION}
         SOVERSION ${PROJECT_VERSION_MAJOR}

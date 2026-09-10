@@ -284,11 +284,13 @@ static inline unsigned char *gs_fixture(const char *name, size_t *len)
     }
 
 /*
- * ⚠ SAYS OUT LOUD WHEN THE FAILURES ARE EXPECTED.  While a group of source
- * files is still missing, src/gs_unimplemented.c supplies those symbols and
- * every case touching them fails.  Printing which groups are scaffolded turns
- * a wall of red into a progress bar; without it, a genuine regression is
- * invisible among the not-yet-written.
+ * ⚠ SAYS OUT LOUD WHEN THE FAILURES ARE EXPECTED.  Kept, and inert: every
+ * source group has landed, so nothing defines GS_SCAFFOLDED_GROUPS and no
+ * banner prints.  While the library was being written a group's symbols came
+ * from a scaffold and every case touching them failed, and naming those groups
+ * turned a wall of red into a progress bar — without it a genuine regression is
+ * invisible among the not-yet-written.  Whoever splits the sources again gets
+ * that back by defining the macro; a green suite prints nothing.
  */
 #ifdef GS_SCAFFOLDED_GROUPS
 #define GS_SCAFFOLD_BANNER_()                                                                \
