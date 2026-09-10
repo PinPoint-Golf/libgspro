@@ -564,4 +564,87 @@ GS_TEST(replay_does_not_call_a_host_originated_201_a_missing_reply)
     (void)remove(path);
 }
 
+GS_TEST(replay_gives_a_connection_slot_back_when_the_capture_closes_it)
+{
+    /* ⚠ FOUND BY A REAL RUN, NOT BY A HUNCH.  A sweep of 138 sessions against
+     * gsplisten produced a capture with 133 connections — one after another,
+     * never more than one at a time — and the replay tracked ids EVER SEEN
+     * rather than ids currently OPEN.  Its table filled at sixteen, it re-opened
+     * ids it had forgotten, it skipped their closes, it exhausted the server's
+     * connection table, and it reported 31 of 133 messages with 101 replies
+     * "missing": the capture read back as a DIFFERENT SESSION, which is the one
+     * thing a capture must never do.
+     *
+     * So: more sequential connections than the replay's own table holds, into a
+     * server that allows four at a time.  ⚠ `sessions` must stay above
+     * GS_REPLAY_CONNS in record/gs_record.c — raising that constant without
+     * raising this number would retire the case while it still passed. */
+    const char *path = gs_tmp("sequential_connections");
+    const unsigned sessions = 80u;
+    gsp_server_config cfg = gsp_server_config_default();
+    gsp_server *live;
+    gsp_server *again;
+    gsp_recorder *rec = NULL;
+    gsp_replay *rp = NULL;
+    gsp_replay_report report;
+    gsp_wire_chunk chunks[16];
+    gsp_write_request writes[GS_DRAIN_MAX];
+    size_t got;
+    unsigned i;
+    char json[64];
+
+    cfg.wire_ring = 16u;
+    cfg.max_connections = 4u;      /* ⚠ FEWER than the sessions below */
+    live = gs_srv_create(&cfg);
+    if (live == NULL) {
+        return;
+    }
+    GS_ASSERT_EQ(gsp_recorder_open(path, NULL, &rec), GSP_OK);
+    if (rec == NULL) {
+        gs_srv_free(live);
+        return;
+    }
+    for (i = 0; i < sessions; ++i) {
+        gsp_conn_id conn = (gsp_conn_id)(100u + i);
+        (void)gsp_server_on_connection_opened(live, conn, NULL, gs_now);
+        (void)snprintf(json, sizeof(json), "{\"DeviceID\":\"A\",\"ShotNumber\":%u}", i);
+        GS_ASSERT_EQ(gsp_server_on_bytes(live, conn, (const uint8_t *)json, strlen(json),
+                                         gs_now), GSP_OK);
+        (void)gs_srv_writes(live, writes, GS_DRAIN_MAX);
+        GS_ASSERT_EQ(gsp_server_on_connection_closed(live, conn, GSP_CLOSE_REMOTE_CLOSED,
+                                                     gs_now), GSP_OK);
+        /* ⚠ Drained and written every time round, as a host must: the ring is
+         * drop-oldest and holds sixteen (design §3.4). */
+        while ((got = gsp_server_poll_wire(live, chunks, 16u)) > 0u) {
+            GS_ASSERT_EQ(gsp_recorder_write(rec, chunks, got), GSP_OK);
+        }
+    }
+    GS_ASSERT_EQ(gsp_server_dropped_wire(live), 0u);   /* nothing was lost */
+    GS_ASSERT_EQ(gsp_recorder_close(rec), GSP_OK);
+    gs_srv_free(live);
+
+    cfg = gsp_server_config_default();
+    cfg.max_connections = 4u;
+    again = gs_srv_create(&cfg);
+    GS_ASSERT_EQ(gsp_replay_open(path, &rp), GSP_OK);
+    if (again == NULL || rp == NULL) {
+        if (rp != NULL) {
+            gsp_replay_close(rp);
+        }
+        gs_srv_free(again);
+        return;
+    }
+    memset(&report, 0, sizeof(report));
+    GS_ASSERT_EQ(gsp_replay_into_server(rp, again, &report), GSP_OK);
+    GS_ASSERT_EQ(report.connections, (uint64_t)sessions);
+    GS_ASSERT_EQ(report.messages, (uint64_t)sessions);
+    GS_ASSERT_EQ(report.replies_matched, (uint64_t)sessions);
+    GS_ASSERT_EQ(report.replies_missing, 0u);
+    GS_ASSERT_EQ(report.replies_differing, 0u);
+
+    gsp_replay_close(rp);
+    gs_srv_free(again);
+    (void)remove(path);
+}
+
 GS_TEST_MAIN()

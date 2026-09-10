@@ -63,6 +63,8 @@ questions in [`docs/protocol.md` §11](docs/protocol.md). See
 - [`docs/design.md`](docs/design.md) — how the library answers that protocol, and why.
 - [`docs/conformance.md`](docs/conformance.md) — what every known client puts on the wire and
   expects back, and the numbered cases that follow from it.
+- [`docs/conformance-runs.md`](docs/conformance-runs.md) — a dated record of what was actually
+  run and what came back, including what each run **changed**. ⚠ Evidence, not a claim.
 - [`include/gspro/`](include/gspro/) — the public API, written from the design. Start with
   [`gspro.h`](include/gspro/gspro.h), then [`server.h`](include/gspro/server.h).
 - [`tests/`](tests/) — the conformance suite, and [`tests/fixtures/`](tests/fixtures/) — one

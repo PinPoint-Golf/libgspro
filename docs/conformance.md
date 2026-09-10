@@ -26,6 +26,10 @@ cmake --preset dev && cmake --build --preset dev && ctest --preset dev
 cmake --preset san && cmake --build --preset san && ctest --preset san   # CT-D24, CT-X02
 ```
 
+[`conformance-runs.md`](conformance-runs.md) records what each run actually produced — the
+counts, the coverage, the soaks, and ⚠ **what the run changed**, because a run that changes
+nothing is a run that was not looking.
+
 ⚠ **Green here is not the same as correct.** Every case is read from a client's source, not
 from a wire, so the suite says the library agrees with what those clients are written to send —
 design §11's package 7 is where that meets hardware.

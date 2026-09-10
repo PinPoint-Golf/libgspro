@@ -105,9 +105,15 @@ socket, deterministically, from byte-string fixtures (§10).
 
 **The purity rule is a test, not a promise.** `tests/purity.cmake` inspects the built object's
 undefined symbols and fails on `socket`, `bind`, `listen`, `accept`, `recv`, `send`, `select`,
-`poll`, `pthread_create`, `clock_gettime`, `fopen`, `getenv` and their Windows equivalents. The
-core's entire undefined-symbol set is expected to be `memcpy`, `memmove`, `memset`, `memcmp`,
-`strlen`, `snprintf`, `strtod` and the compiler's own hooks.
+`poll`, `pthread_create`, `clock_gettime`, `fopen`, `getenv` and their Windows equivalents.
+
+⚠ **The core's entire undefined-symbol set, measured rather than assumed** (Apple clang 21,
+arm64, 2026-09-10): `memcpy`, `memmove`, `memset`, `memcmp`, `bzero`, `strcmp`, `strncmp`,
+`strlen`, `strtod`, `snprintf`, `malloc`, `free`, `hypot`, `atan2`, `sin`, `cos`, and the
+compiler's own hardening hooks. `malloc`/`free` are the one allocation of §3.4 — supply
+`gsp_allocator` and they are still linked but never called — and the four maths functions are
+the spin derivation of §4.3, which is why the target carries `-lm` publicly. An earlier version
+of this paragraph listed neither, which is the sort of drift a run is for.
 
 ---
 

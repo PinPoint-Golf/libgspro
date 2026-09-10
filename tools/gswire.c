@@ -155,8 +155,7 @@ static int cmd_stats(const char *path)
     gsp_time_us first = 0;
     gsp_time_us last = 0;
     bool have_time = false;
-    gsp_conn_id conns[16];
-    size_t conn_count = 0u;
+    uint64_t opens = 0u;
     gsp_status st = gsp_replay_open(path, &rp);
 
     if (st < GSP_OK) {
@@ -167,8 +166,6 @@ static int cmd_stats(const char *path)
         size_t i;
         for (i = 0; i < n; ++i) {
             const gsp_wire_chunk *c = &chunks[i];
-            size_t k;
-            bool known = false;
             bytes += (uint64_t)c->length;
             if (!have_time) {
                 first = c->host_time_us;
@@ -184,14 +181,16 @@ static int cmd_stats(const char *path)
             switch ((gsp_wire_direction)c->direction) {
             case GSP_WIRE_CLIENT_TO_SERVER: client++; break;
             case GSP_WIRE_SERVER_TO_CLIENT: server++; break;
-            case GSP_WIRE_META:             meta++;   break;
+            case GSP_WIRE_META:
+                meta++;
+                /* ⚠ COUNTED FROM THE OPENS THEMSELVES rather than from a table
+                 * of distinct ids.  A table has a size, and the first capture
+                 * this tool met had 133 connections: it reported 16. */
+                if (c->length >= 17u && memcmp(c->data, "CONNECTION_OPENED", 17u) == 0) {
+                    opens++;
+                }
+                break;
             default: break;
-            }
-            for (k = 0; k < conn_count; ++k) {
-                known = known || (conns[k] == c->conn);
-            }
-            if (!known && conn_count < 16u && c->conn != GSP_CONN_NONE) {
-                conns[conn_count++] = c->conn;
             }
         }
     }
@@ -199,7 +198,7 @@ static int cmd_stats(const char *path)
            (unsigned long long)gsp_replay_chunks_read(rp), (unsigned long long)client,
            (unsigned long long)server, (unsigned long long)meta);
     printf("  payload     %llu byte(s)\n", (unsigned long long)bytes);
-    printf("  connections %zu\n", conn_count);
+    printf("  connections %llu opened\n", (unsigned long long)opens);
     printf("  redacted    %llu chunk(s)\n", (unsigned long long)redacted);
     /* ⚠ A capture with holes is still evidence, but not of ABSENCE: what is not
      * in it may have been dropped rather than never sent (design §3.4). */

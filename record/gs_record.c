@@ -489,11 +489,21 @@ void gsp_replay_close(gsp_replay *r)
  * the library makes of them NOW against what it said THEN is the thing that
  * answers "would the fix have helped?" without a launch monitor in the room.
  */
-#define GS_REPLAY_CONNS   16u
+/*
+ * ⚠ CONCURRENTLY OPEN, NOT EVER SEEN, and the difference is not academic: a
+ * sweep of 138 sessions against gsplisten produced a capture with 133
+ * connections, one after another, never more than one at a time.  A table of
+ * ids-ever-seen filled at sixteen and the replay then re-opened ids it had
+ * forgotten, skipped their closes, exhausted the server's connection table and
+ * reported 31 of 133 messages with 101 replies "missing" — a capture read back
+ * as a different session.  Tracking the OPEN ones instead bounds this by what
+ * the server itself allows at once, which is the honest bound.
+ */
+#define GS_REPLAY_CONNS   64u
 #define GS_REPLAY_PENDING 32u
 
 typedef struct gs_replay_state {
-    gsp_conn_id ids[GS_REPLAY_CONNS];
+    gsp_conn_id ids[GS_REPLAY_CONNS];   /* currently OPEN */
     size_t      count;
     /* Replies the server produced but no recorded chunk has claimed yet, in
      * order.  ⚠ Bounded: a capture whose replies outrun this many un-matched is
@@ -503,7 +513,7 @@ typedef struct gs_replay_state {
     size_t            pending_count;
 } gs_replay_state;
 
-static bool replay_known(gs_replay_state *st, gsp_conn_id conn)
+static bool replay_is_open(const gs_replay_state *st, gsp_conn_id conn)
 {
     size_t i;
     for (i = 0; i < st->count; ++i) {
@@ -514,10 +524,23 @@ static bool replay_known(gs_replay_state *st, gsp_conn_id conn)
     return false;
 }
 
-static void replay_remember(gs_replay_state *st, gsp_conn_id conn)
+static void replay_opened(gs_replay_state *st, gsp_conn_id conn)
 {
     if (st->count < GS_REPLAY_CONNS) {
         st->ids[st->count++] = conn;
+    }
+}
+
+static void replay_closed(gs_replay_state *st, gsp_conn_id conn)
+{
+    size_t i;
+    for (i = 0; i < st->count; ++i) {
+        if (st->ids[i] == conn) {
+            memmove(&st->ids[i], &st->ids[i + 1u],
+                    (st->count - i - 1u) * sizeof(st->ids[0]));
+            st->count--;
+            return;
+        }
     }
 }
 
@@ -684,11 +707,12 @@ gsp_status gsp_replay_into_server(gsp_replay *r, gsp_server *server, gsp_replay_
                  * first chunks are exactly what a busy session loses — and a
                  * replay that refused to feed bytes for a connection it never
                  * saw open would discard the part of the capture that survived. */
-                if (!replay_known(&st, c->conn)) {
-                    replay_remember(&st, c->conn);
-                    rep.connections++;
-                    (void)gsp_server_on_connection_opened(server, c->conn, NULL,
-                                                          c->host_time_us);
+                if (!replay_is_open(&st, c->conn)) {
+                    if (gsp_server_on_connection_opened(server, c->conn, NULL,
+                                                        c->host_time_us) >= GSP_OK) {
+                        replay_opened(&st, c->conn);
+                        rep.connections++;
+                    }
                     replay_drain(server, &st, &rep);
                     /* The announce-on-connect writes belong to THIS server's
                      * policy, not to the recording; they are produced, and the
@@ -715,13 +739,16 @@ gsp_status gsp_replay_into_server(gsp_replay *r, gsp_server *server, gsp_replay_
                  * close is recognised by the one word that cannot appear in a
                  * JSON payload chunk.  A capture with no close line simply
                  * leaves the connection open, which is what it was. */
-                if (c->length >= 17u
-                    && memchr(c->data, 'C', 1u) != NULL
-                    && memcmp(c->data, "CONNECTION_CLOSED", 17u) == 0
-                    && replay_known(&st, c->conn)) {
+                if (c->length >= 17u && memcmp(c->data, "CONNECTION_CLOSED", 17u) == 0
+                    && replay_is_open(&st, c->conn)) {
+                    /* ⚠ AND THE SLOT IS GIVEN BACK.  A replay that opened
+                     * connections and never closed them would exhaust the
+                     * server's table partway through any real session, which is
+                     * one connection per device power-cycle. */
                     (void)gsp_server_on_connection_closed(server, c->conn,
                                                           GSP_CLOSE_REMOTE_CLOSED,
                                                           c->host_time_us);
+                    replay_closed(&st, c->conn);
                     replay_drain(server, &st, &rep);
                 }
                 break;
