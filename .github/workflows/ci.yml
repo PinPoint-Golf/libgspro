@@ -28,7 +28,7 @@ jobs:
           - { name: "macos",       os: macos-latest,   cc: clang, extra: "" }
           - { name: "windows",     os: windows-latest, cc: "",    extra: "" }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug ${{ matrix.extra }}
         env:
@@ -52,7 +52,7 @@ jobs:
     name: install and consume
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Configure and build
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug \
@@ -104,7 +104,7 @@ jobs:
     name: conformance progress
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
       - run: cmake --build build --parallel
       # ⚠ `shell: bash` rather than the default `bash -e`, and an explicit exit 0.

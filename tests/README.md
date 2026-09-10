@@ -2,24 +2,26 @@
 <!-- Copyright (C) 2026 Mark Liversedge -->
 # The conformance suite
 
-The executable form of [`../docs/conformance.md`](../docs/conformance.md): **103 cases** over
-eight binaries, plus the sans-I/O gate and a fixture cross-check that needs no C at all.
+The executable form of [`../docs/conformance.md`](../docs/conformance.md): the CT- cases over
+eight C binaries and two Python programs (the ABI pin and the host-transport cases), plus the
+sans-I/O gate and two cross-checks that need no C at all.  `ctest --preset dev` runs 13 tests.
 
 ```sh
 cmake --preset dev && cmake --build --preset dev && ctest --preset dev
 cmake --preset san && cmake --build --preset san && ctest --preset san
 ```
 
-⚠ **Most of it is red right now, and that is the design.** The suite was written before the
-library (design §11 package 1b) so that the specification could be run rather than only read.
-`src/gs_unimplemented.c` supplies whatever `src/` does not yet define, so everything links and
-every case reports a real failure instead of the whole build failing to link and telling
-nobody anything. The configure line and each binary's first line of output name the groups
-still standing in:
+⚠ **It is green now, and that was the whole point of writing it first.** The suite was written
+before the library (design §11 package 1b) so that the specification could be run rather than
+only read: while a source group was missing a scaffold supplied its symbols and the cases
+touching it failed, on purpose, so the suite was a spec you could execute.  Every group has
+landed, the scaffold is deleted, and the conformance run is the CI gate — red means a real
+regression.
 
-```
--- libgspro: NOT IMPLEMENTED YET — FRAME DECODE ENCODE MISC SERVER
-```
+⚠ **Green is not the same as correct.** Every fixture is a transcription of a client's
+serialiser, not a capture off a wire, so the suite proves the library agrees with what those
+clients are *written* to send.  Whether it agrees with a real device is design §11's package 7,
+which has not happened yet.
 
 ## What is here
 
@@ -35,6 +37,8 @@ still standing in:
 | `test_conn.c` | CT-C — connection lifecycle |
 | `test_robust.c` | CT-X — hostile input, ring behaviour, ABI |
 | `test_api.c` | The vocabulary tables, the redaction sweep, the documented defaults |
+| `test_python_abi.py` | The ctypes binding's structs, offsets, enums and bounds against `tools/gs_abi_table.c` — the compiler's own layout (CT-X07) |
+| `test_python_transport.py` | CT-T — a host driving a real socket: reply latency, one write per message, spacing, a client vanishing mid-message |
 | `test_fixtures.py` | The fixtures checked against the protocol document **in Python**, so the evidence and the decoder cannot be wrong together |
 | `test_coverage.py` | Every `CT-` row in the document has a case and every case has a row. ⚠ A case may be deferred, but only by id and with a reason, in that file |
 | `purity.cmake` | The library must not reference `socket`, `bind`, `accept`, a clock, a thread or a file |
@@ -42,10 +46,12 @@ still standing in:
 
 ## Labels
 
-`ctest -L ready` runs what must pass today — the purity gate, the fixture cross-check and the
-coverage cross-check.
-`ctest -L conformance` runs the specification. CI blocks on the first and reports the second
-as a count, because a job that is always red teaches everyone to ignore it.
+`ctest -L ready` runs the three that need no library — the purity gate and the fixture and
+coverage cross-checks.
+`ctest -L conformance` runs the specification, and CI now **blocks** on it: every group has
+landed, so a red conformance run is a real regression rather than work not yet done.  The
+non-blocking `progress` job still prints the green-case count, where a number that quietly
+falls — a retired case — stays visible.
 
 ## Adding a case
 
