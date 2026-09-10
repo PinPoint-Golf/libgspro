@@ -242,19 +242,10 @@ gsp_status gsp_message_encode(const gsp_message *m, bool indent, char *out, size
 /* ------------------------------------------------------------------------ */
 #ifndef GS_HAVE_SERVER
 
-gsp_server_policy gsp_server_policy_default(void)
-{
-    gsp_server_policy p;
-    memset(&p, 0, sizeof(p));
-    return p;
-}
-
-gsp_server_config gsp_server_config_default(void)
-{
-    gsp_server_config c;
-    memset(&c, 0, sizeof(c));
-    return c;
-}
+/* ⚠ gsp_server_policy_default() and gsp_server_config_default() are NOT here.
+ * They are pure values with no server behind them and design §11 makes the
+ * documented defaults part of package 2's "API family", so they live in
+ * src/gs_misc.c and are real from the moment that file exists. */
 
 gsp_status gsp_server_create(const gsp_server_config *config, gsp_server **out)
 {
