@@ -28,8 +28,18 @@ import re
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "python"))
+
+# ⚠ THE OTHER HALF OF THE CONTAINER CROSS-CHECK.  tests/test_python_wire.py
+# writes a capture in Python and reads it with the C tool; this reads a capture
+# the C recorder wrote, in Python, from a session that really went over a socket.
+# A format defined by exactly one program is defined by that program's bugs.
+from gspro.wire import Reader  # noqa: E402
 
 failures = 0
 
@@ -85,10 +95,13 @@ def main() -> int:
     check(bad.returncode != 0, "an unknown option is refused")
 
     shot = (fixtures / "gsp_full.json").read_bytes()
+    tmp = tempfile.TemporaryDirectory()
+    capture = Path(tmp.name) / "session.gswire"
 
     proc = subprocess.Popen(
         [str(tool), "--host", "127.0.0.1", "--port", "0", "--shots", "1",
-         "--club", "PT", "--distance", "4.2", "--handed", "RH", "--session-active"],
+         "--club", "PT", "--distance", "4.2", "--handed", "RH", "--session-active",
+         "--record", str(capture), "--note", "tests/test_gsplisten.py"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
         encoding="utf-8", errors="replace")
     try:
@@ -122,7 +135,65 @@ def main() -> int:
         # ⚠ Identifiers are REDACTED unless asked for (design §9.2): the peer
         # address of the connection above must not be in this output.
         check("127.0.0.1:" not in rest, "the peer address was redacted")
+
+        # --- the capture, read by the OTHER implementation ----------------
+        check(capture.exists(), "--record wrote a capture")
+        if capture.exists():
+            with Reader(capture) as reader:
+                info = reader.info
+                chunks = list(reader)
+            check(info.port > 0, f"the header names the port it listened on ({info.port})")
+            check(not info.identifiers_recorded,
+                  "and says the capture is redacted, which it is by default")
+            check(info.note == "tests/test_gsplisten.py", "the note survived")
+            client = [c for c in chunks if c.direction == 0]
+            server = [c for c in chunks if c.direction == 1]
+            meta = [c for c in chunks if c.direction == 2]
+            check(len(meta) >= 1, "the connection's own life is in there")
+            check(len(client) >= 1, "so are the client's bytes")
+            check(len(server) >= 2, "and every reply (201, 202, 200)")
+            payloads = b"".join(c.data for c in chunks)
+            # ⚠ The shot fixture's DeviceID must not have survived into a file
+            # somebody might share (design §9.2, CT-W09).
+            check(b"<redacted>" in payloads, "the DeviceID was overwritten in place")
+            check(b"127.0.0.1:" not in payloads, "and no peer address is in the capture")
+            check(b"Shot received successfully" in payloads,
+                  "the acknowledgement is recorded as it went out")
+            check([c.sequence for c in chunks] == sorted(c.sequence for c in chunks),
+                  "and the chunks are in order")
+        # --- ⚠ AND IT SURVIVES A KILL --------------------------------------
+        # A capture is taken ONCE, beside hardware that is not coming back.  The
+        # first time this was tried by hand, a listener stopped with a signal
+        # left a ZERO-BYTE file: the whole session was still in stdio's buffer.
+        # Both recorders now flush every batch, and this is the case that says
+        # so — killed outright, mid-session, with no chance to close the file.
+        killed_capture = Path(tmp.name) / "killed.gswire"
+        killed = subprocess.Popen(
+            [str(tool), "--host", "127.0.0.1", "--port", "0",
+             "--record", str(killed_capture)],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+            encoding="utf-8", errors="replace")
+        try:
+            port2 = wait_for_port(killed)
+            with socket.create_connection(("127.0.0.1", port2), timeout=5.0) as sock:
+                sock.settimeout(5.0)
+                sock.sendall(shot)
+                sock.recv(4096)          # the 200 came back, so the shot landed
+            time.sleep(0.2)
+            killed.kill()                # ⚠ no exit path, no flush of its own
+            killed.wait(timeout=5)
+            with Reader(killed_capture) as reader:
+                survivors = list(reader)
+            check(any(c.direction == 0 for c in survivors),
+                  "a killed listener still leaves the shot in the capture")
+            check(any(c.direction == 1 for c in survivors),
+                  "and the reply that went out before it died")
+        finally:
+            if killed.poll() is None:
+                killed.kill()
+                killed.wait(timeout=5)
     finally:
+        tmp.cleanup()
         if proc.poll() is None:
             proc.kill()
             proc.wait(timeout=5)

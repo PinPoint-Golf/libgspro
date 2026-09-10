@@ -721,7 +721,34 @@ server→client, meta for open/close), connection id, host time, sequence, and u
 the ring the config sized (default off); writing chunks anywhere is the host's business, or the
 optional `gspro_record` module's, which defines a `.gswire` container and a replay that drives
 a recorded session back through a server. The container format is the `libwrist` `.wrwire`
-shape with a different magic and a connection-id field; §11 sequences it after the core.
+shape with a different magic and a connection-id field.
+
+**A chunk is one message, one discarded run, or one reply — not one `read()`.** Read boundaries
+are the kernel's rather than the client's (§3.2.1), so recording them would preserve an
+artefact; and redaction has to know where the `DeviceID` value *sits*, which is knowable only
+once an object has been framed. ⚠ **What could not be decoded is recorded anyway**: a capture
+taken to explain a client this library rejected, which omitted the bytes it rejected, would
+omit the whole subject. Conformance §3.9 (`CT-W01`–`CT-W12`) is the executable form of this
+paragraph.
+
+`gspro_record` (`GS_BUILD_RECORD`, `include/gspro/record.h`) is `gsp_recorder` — chunks to a
+file — and `gsp_replay` — a file back to chunks, byte-exact. ⚠ **`gsp_replay_into_server()` is
+the one that earns the format**: it feeds a recorded session back through a server built by
+this library *now* and reports what it makes of it, comparing every reply with the reply that
+was actually sent. When U2, U4 or U7 is settled and the decoder changes, that answers "would
+the fix have helped?" without the launch monitor, the mat, or the person who owns them. The
+`gswire` tool prints it (`gswire replay`), and `gswire extract` is how one message of a capture
+becomes a fixture in `tests/fixtures/`.
+
+⚠ **A capture is flushed after every batch, in both implementations.** A capture is taken once,
+beside hardware that is not coming back, and the first listener stopped with a signal during
+development left a *zero-byte file* — the whole session still in stdio's buffer. Messages
+arrive seconds apart, so the cost is nothing anybody can measure.
+
+⚠ **The container is written twice on purpose** — `record/gs_record.c` and
+`python/gspro/wire.py` — and the two are checked against each other in both directions
+(`tests/test_python_wire.py`, `tests/test_gsplisten.py`). A format defined by exactly one
+program is a format defined by that program's bugs, and this one has to outlive a release.
 
 ⚠ **Peer addresses and `DeviceID` strings are redacted from the wire log by default**
 (`policy.record_identifiers`), and a chunk that was redacted says so with `GSP_WIRE_REDACTED`.
@@ -840,8 +867,8 @@ listener with `asyncio` and drives `gsp_shoot.py` at it.
 
 ## 11. Implementation plan and status
 
-⚠ **Status: the core, the Python binding and the reference net transport are built, and the
-whole conformance suite is green** — 103 socket-free cases, the host-transport family twice
+⚠ **Status: the core, the Python binding, the reference net transport and the wire log are
+built, and the whole conformance suite is green** — 103 socket-free cases, the host-transport family twice
 over (nine cases against the asyncio adapter and the same nine plus four against the C one),
 clean under `--preset dev` and `--preset san`. ⚠ **It has still never met a launch monitor**, which
 is package 7 and the only thing that can close protocol §11's unknowns. This document and
@@ -863,7 +890,7 @@ appears.
 | 3 | **Server** ✅ | `src/gs_server.c`: connections, replies, player info, session state, events, idle alarm — turns CT-R, CT-P, CT-C, CT-X and the rest of CT-F green | 2 |
 | 4 | **FFI + Python** ✅ | `gspro_ffi` target, `python/gspro/`, `tools/gs_abi_table.c` + `tests/test_python_abi.py`, `gsp_listen.py`, `gsp_shoot.py`, asyncio transport — and nine of the ten CT-T rows, which had nothing to run against until there was a socket | 3 |
 | 5 | **Reference net transport + tool** ✅ | `gspro_net` — `net/gs_net.c` and `include/gspro/net.h`, one `select()` loop behind `GS_BUILD_NET` — the `gsplisten` CLI, and the CT-T rows run a SECOND time against it (`tests/test_net.c`) | 3 |
-| 6 | Wire log + record | `poll_wire`, `gspro_record`, `.gswire`, replay | 3 |
+| 6 | **Wire log + record** ✅ | The core fills the ring (`CT-W01`–`CT-W12`), `gspro_record` — the `.gswire` container and `gsp_replay_into_server()` — the `gswire` tool, `--record` on both listeners, and a second reader in Python | 3 |
 | 7 | **First contact** | A session against at least one real connector ([MLM] or [R10] with its device, or PiTrac) captured to `.gswire`; §11 of the protocol document updated with what was learned; fixtures promoted from the capture | 4 or 5, 6 |
 | 8 | PinPoint Studio | `Kind::GsPro`, `GsProMonitor`, the mapping of §6, the settings panel, the CMake block | 3, and 7 for confidence |
 
@@ -885,6 +912,7 @@ answering U1–U10 rather than debugging framing.
 | `gspro/codec.h` | Stateless framing, decoding and encoding — public so tools, tests and bindings can parse without a server |
 | `gspro/event.h` | `gsp_event` and its payloads, `gsp_event_format()`, `gsp_event_is_sensitive()` |
 | `gspro/server.h` | The server, the threading contract, the transport contract, policy, config, rings, `gsp_wire_chunk` |
+| `gspro/record.h` | ⚠ **Not the core.** The optional `.gswire` container and replay (`gspro_record`, `GS_BUILD_RECORD`): `gsp_recorder_*`, `gsp_replay_*`, `gsp_replay_into_server()` and its report. It opens files, which is what `tests/purity.cmake` forbids the core |
 | `gspro/net.h` | ⚠ **Not the core.** The optional reference transport (`gspro_net`, `GS_BUILD_NET`): `gsp_net_open/poll/close`, `gsp_net_config`, `gsp_net_stats`, and the monotonic clock the core may not read. A consumer that has its own socket loop never includes it |
 
 Internal, reachable from tests: `src/gs_frame.h` (the incremental framer the server keeps per

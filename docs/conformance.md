@@ -13,8 +13,8 @@ that when a client is dropped or a new one appears the suite can be re-derived r
 re-argued. ⚠ **No case here has yet been run against a real launch monitor**; the matrix is
 read from source, and design §11's package 7 is where it meets hardware.
 
-**The suite is built, runs, and is green.** `tests/` holds **103 socket-free cases** across
-eight binaries, plus the sans-I/O gate and a Python fixture cross-check that needs no C at
+**The suite is built, runs, and is green.** `tests/` holds **115 socket-free cases** across
+nine binaries, plus the sans-I/O gate and a Python fixture cross-check that needs no C at
 all — and the host-transport family (§3.8) on top of that, **twice**: nine cases against the
 asyncio reference adapter and the same nine, with four more about the transport itself,
 against the C one behind `GS_BUILD_NET`. It was written before the library, so that the specification was one that could be run
@@ -128,7 +128,7 @@ the real path is the strongest evidence in this survey short of a capture:
 
 Each case names the input, the required outcome, and the sources that make it necessary.
 Prefix: **F** framing, **D** decode, **K** kind, **R** reply, **P** player and session, **C**
-connection, **X** robustness, **T** host transport. A case marked **[T]** is verified against
+connection, **W** wire log, **X** robustness, **T** host transport. A case marked **[T]** is verified against
 a host's socket adapter — with `gsp_shoot.py`, or with the C client half of
 [`tests/gs_net_client.h`](../tests/gs_net_client.h) — and not against the library alone. ⚠ **A
 T case is therefore written once per adapter rather than once**, and
@@ -317,6 +317,43 @@ covers completely.
 impossible (design §5.5); a case that demanded two segments would be testing the kernel's
 scheduler. CT-T03 asserts the thing that *can* be made true: with `write_spacing_us` set, the
 two replies are held apart in time.
+
+### 3.9 Wire log [W]
+
+The byte-level record of design §7, and the reason it exists: `protocol.md` §11 lists ten open
+questions, and when U2, U4 or U7 is answered a **byte-level** capture of the session that
+answered it re-decodes with the fix applied. A decoded log has already thrown away what the fix
+would have read differently. The first capture against a real launch monitor is the fixture
+that pins the decoder, which makes these rows preconditions for design §11's package 7.
+
+⚠ **The wire log is OFF unless `config.wire_ring` is set**, and that is the default a case has
+to state rather than assume: a library that recorded a household's traffic because somebody
+turned on verbose logging would be a different kind of library (design §9.2).
+
+| Case | Input | Required | Because |
+|---|---|---|---|
+| CT-W01 | `wire_ring` 0 (the default) | `poll_wire()` returns 0 forever; no chunk is built and nothing is copied | design §7 |
+| CT-W02 | One shot, wire on | one `CLIENT_TO_SERVER` chunk holding the message's **exact bytes**, its connection, and the arrival time | design §7 |
+| CT-W03 | Two objects in one read | two chunks, one per object, in order — a chunk is a MESSAGE, not a read | §2 |
+| CT-W04 | One object split across three reads | one chunk, whole, when the last byte arrives | design §3.2.1 |
+| CT-W05 | An object longer than `GSP_WIRE_CHUNK_MAX` | consecutive chunks, `CONTINUES` on every one but the last, concatenating to the original bytes | design §7 |
+| CT-W06 | Leading garbage, and an oversize object | the **discarded** bytes are recorded too | design §5.3 |
+| CT-W07 | Any reply | one `SERVER_TO_CLIENT` chunk per write request, its exact bytes, recorded when the host polls it | design §9.1 |
+| CT-W08 | Connection opened and closed | `META` chunks carrying the event and, on close, the connection's final counters | design §7 |
+| CT-W09 | `record_identifiers` off (the default) | the `DeviceID` **value** is overwritten in place, the same length so the JSON still parses and offsets hold, `REDACTED` set; the peer address is not in the `META` chunk | design §9.2 |
+| CT-W10 | `record_identifiers` on | `DeviceID` and peer are recorded verbatim, `REDACTED` clear | design §9.2 |
+| CT-W11 | A ring smaller than the traffic | drop-**oldest**, `dropped_wire()` counts them, the next surviving chunk carries `LOST`, one `WARN_WIRE_DROPPED` per overflow run | design §3.4 |
+| CT-W12 | Any session | chunk `sequence` strictly increases, and a gap appears only where chunks were dropped | design §7 |
+
+⚠ **A chunk is one message, one discarded run, or one reply — not one `read()`.** Read
+boundaries are the kernel's, not the client's (design §3.2.1), so recording them would preserve
+an artefact and lose the thing that matters: `DeviceID` redaction (CT-W09) needs to know where
+the value SITS, which is only knowable once an object has been framed.
+
+⚠ **What could not be decoded is recorded anyway** (CT-W06). A capture taken to answer a
+question about a client that this library *failed* on, which omitted the bytes it failed on,
+would omit the whole subject. Redaction is applied to those bytes on a best-effort scan for the
+`DeviceID` key, so a malformed object cannot leak what a well-formed one would not.
 
 ---
 

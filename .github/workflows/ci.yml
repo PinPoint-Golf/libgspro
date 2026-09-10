@@ -14,7 +14,9 @@ jobs:
   # Every source group has landed, so all 103 socket-free cases run on every
   # platform and a red build is a real regression — and since package 5 so do the
   # host-transport cases against the C reference transport (tests/test_net.c) and
-  # the gsplisten smoke test, which are the only jobs here that open a socket.
+  # the gsplisten smoke test, which are the only jobs here that open a socket —
+  # and since package 6, the wire-log family and the .gswire container, which are
+  # the only ones that write files (into the build tree's own directory).
   # ⚠ They bind 127.0.0.1 on an EPHEMERAL port: a runner with 921 held, or with
   # no route to the LAN, must not be a red build.
   # ---------------------------------------------------------------------------
@@ -80,7 +82,34 @@ jobs:
           # forgot it, or a header the install rules missed, fails right here.
           add_executable(consumer_net main_net.c)
           target_link_libraries(consumer_net PRIVATE gspro::gspro_net gspro::gspro)
+          # ⚠ And the recorder, which is a THIRD target from the same package.
+          add_executable(consumer_record main_record.c)
+          target_link_libraries(consumer_record PRIVATE gspro::gspro_record gspro::gspro)
           CMAKE
+          cat > _consumer/main_record.c <<'MAIN'
+          #include "gspro/gspro.h"
+          #include "gspro/record.h"
+          #include <stdio.h>
+          #include <string.h>
+          int main(void) {
+              gsp_recording_info info = gsp_recording_info_default();
+              gsp_recorder *rec = NULL;
+              gsp_replay *rp = NULL;
+              gsp_wire_chunk c;
+              const char *json = "{\"DeviceID\":\"x\",\"ShotNumber\":1}";
+              memset(&c, 0, sizeof(c));
+              c.length = (uint16_t)strlen(json);
+              memcpy(c.data, json, c.length);
+              if (gsp_recorder_open("consumed.gswire", &info, &rec) != GSP_OK) return 1;
+              if (gsp_recorder_write(rec, &c, 1) != GSP_OK) return 1;
+              if (gsp_recorder_close(rec) != GSP_OK) return 1;
+              if (gsp_replay_open("consumed.gswire", &rp) != GSP_OK) return 1;
+              if (gsp_replay_read(rp, &c, 1) != 1) return 1;
+              printf("round-tripped %u byte(s) through .gswire\n", (unsigned)c.length);
+              gsp_replay_close(rp);
+              return 0;
+          }
+          MAIN
           cat > _consumer/main_net.c <<'MAIN'
           #include "gspro/gspro.h"
           #include "gspro/net.h"
@@ -117,6 +146,7 @@ jobs:
           cmake --build _consumer/build
           ./_consumer/build/consumer
           ./_consumer/build/consumer_net
+          ./_consumer/build/consumer_record
       - name: Consume via pkg-config
         run: |
           export PKG_CONFIG_PATH=$PWD/_inst/lib/pkgconfig
@@ -128,6 +158,9 @@ jobs:
           test "$(pkg-config --modversion gspro-net)" = "0.1.0"
           cc _consumer/main_net.c $(pkg-config --cflags --libs gspro-net) -o _pc_net
           ./_pc_net
+          test "$(pkg-config --modversion gspro-record)" = "0.1.0"
+          cc _consumer/main_record.c $(pkg-config --cflags --libs gspro-record) -o _pc_record
+          ./_pc_record
 
   # ---------------------------------------------------------------------------
   # How much of the specification the library satisfies, as a number in the run

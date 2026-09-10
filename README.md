@@ -15,11 +15,11 @@ and reads bytes; the library returns decoded messages, the replies to write, and
 lets it sit inside a Qt application on `QTcpServer`, a Python program on `asyncio`, or a POSIX
 `select` loop, and lets it be tested without a socket.
 
-⚠ **Status: the core, the Python binding and the reference socket transport are built, and
-every conformance case that can run without a launch monitor passes — but it has never met
-one.** All **103 socket-free C cases** are green, and **nine of the ten host-transport cases**
-are green **twice over** — once against the asyncio reference transport and once against the C
-one — clean under AddressSanitizer and UndefinedBehaviorSanitizer.
+⚠ **Status: the core, the Python binding, the reference socket transport and the wire log are
+built, and every conformance case that can run without a launch monitor passes — but it has
+never met one.** All **115 socket-free C cases** are green, and **nine of the ten
+host-transport cases** are green **twice over** — once against the asyncio reference transport
+and once against the C one — clean under AddressSanitizer and UndefinedBehaviorSanitizer.
 Those cases and the 23 byte-exact fixtures behind them are read from the source of sixteen real
 launch-monitor clients, not from a wire, so green means the library agrees with what those
 clients are *written* to send:
@@ -37,8 +37,20 @@ tools/gsp_listen.py --host 0.0.0.0 --port 921 --club PT --distance 4.2
 build/dev/tools/gsplisten --host 0.0.0.0 --port 921 --club PT --distance 4.2
 ```
 
-Still to come: the wire log, and the first session against real hardware — which is the one
-that can close the open questions in [`docs/protocol.md` §11](docs/protocol.md). See
+Capture a session for later, and replay it through the library afterwards:
+
+```sh
+build/dev/tools/gsplisten --host 0.0.0.0 --record session.gswire --note "R10 on the mat"
+build/dev/tools/gswire replay session.gswire     # what the library makes of it NOW
+build/dev/tools/gswire extract session.gswire 3 tests/fixtures/r10_capture.json
+```
+
+⚠ **Captures record bytes, not decoded messages**, so when one of the protocol's open questions
+is finally settled the session that settled it re-decodes with the fix applied. Peer addresses
+and `DeviceID`s are redacted in place unless you ask for them.
+
+Still to come: the first session against real hardware — the one that can close the open
+questions in [`docs/protocol.md` §11](docs/protocol.md). See
 [`docs/design.md` §11](docs/design.md#11-implementation-plan-and-status) for the sequence.
 
 ## Documentation
@@ -91,9 +103,10 @@ cmake --preset dev && cmake --build --preset dev && ctest --preset dev
 Presets `dev`, `san`, `cov`, `rel` and `release` wrap the usual configurations. Embedded with
 `add_subdirectory` or `FetchContent` exactly as [libwrist](../libwrist) is, and consumed as
 `#include <gspro/gspro.h>` linking the `gspro` target. Adding it to a project changes nothing
-about that project: the tests, the FFI object, the reference transport, `-Werror` and the
-install rules all default to ON when this is the top-level project and OFF when it is not
-(`GS_BUILD_TESTS`, `GS_BUILD_FFI`, `GS_BUILD_NET`, `GS_WERROR`, `GS_INSTALL`).
+about that project: the tests, the FFI object, the reference transport, the recorder, `-Werror`
+and the install rules all default to ON when this is the top-level project and OFF when it is
+not (`GS_BUILD_TESTS`, `GS_BUILD_FFI`, `GS_BUILD_NET`, `GS_BUILD_RECORD`, `GS_WERROR`,
+`GS_INSTALL`).
 
 **If you would rather not write the socket loop**, `GS_BUILD_NET` builds one:
 `gspro_net` — `#include <gspro/net.h>`, link `gspro::gspro_net` — is a POSIX/Winsock
@@ -113,15 +126,22 @@ for (;;) {
 }
 ```
 
+`GS_BUILD_RECORD` adds `gspro_record` — `#include <gspro/record.h>`, link
+`gspro::gspro_record` — the `.gswire` container, the replay, and the `gswire` tool. ⚠ Also a
+separate target: it opens files, and the core may not.
+
 `tests/purity.cmake` fails the build if the core ever references a socket, a thread, a timer,
-a clock or a file — the property that makes the library embeddable at all.
+a clock or a file — the property that makes the library embeddable at all. Both optional
+targets are made of exactly what it forbids, which is why they are separate.
 
 ## Python
 
 `python/gspro/` is a ctypes binding over `libgspro_ffi`, laid out as `python/wrist/` is,
 with an optional `asyncio` transport that is **not** imported by `import gspro`, and two tools:
-`gsp_listen.py` (a complete listener) and `gsp_shoot.py` (a launch monitor simulator that sends
-fixtures to a libgspro listener — and refuses to aim at a real GSPro).
+`gsp_listen.py` (a complete listener, with `--record`) and `gsp_shoot.py` (a launch monitor
+simulator that sends fixtures to a libgspro listener — and refuses to aim at a real GSPro).
+`gspro.wire` is a second implementation of the `.gswire` container, checked against the C one
+in both directions.
 
 ## Disclaimer
 

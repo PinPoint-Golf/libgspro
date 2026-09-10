@@ -36,6 +36,10 @@ option(GS_BUILD_FFI       "Build the shared object the Python binding loads" ${G
 # tests/purity.cmake; PinPoint Studio drives the same server from QTcpServer and
 # must never link it by accident (design §3.1).
 option(GS_BUILD_NET       "Build the reference socket transport (gspro_net)" ${GS_IS_TOP_LEVEL})
+# ⚠ The .gswire container and the replay, and OFF for a consumer by the same
+# reasoning as GS_BUILD_NET: it opens FILES, which purity.cmake forbids the core.
+# A host with its own storage writes forty lines instead (design §7).
+option(GS_BUILD_RECORD    "Build the .gswire recorder and replay (gspro_record)" ${GS_IS_TOP_LEVEL})
 option(GS_ENABLE_ASAN     "Build with AddressSanitizer"              OFF)
 option(GS_ENABLE_UBSAN    "Build with UndefinedBehaviorSanitizer"    OFF)
 option(GS_ENABLE_COVERAGE "Build with gcov coverage instrumentation" OFF)
@@ -203,6 +207,34 @@ if(GS_BUILD_NET)
 endif()
 
 # ---------------------------------------------------------------------------
+# gspro_record — the optional .gswire container and the replay (design §7).
+#
+# ⚠ A SEPARATE TARGET FOR THE SAME REASON gspro_net IS ONE.  The core copies
+# wire chunks into a ring and the host drains them; this is one host that writes
+# them to a file, and it is made of the fopen()s tests/purity.cmake fails the
+# build for finding in `gspro`.
+# ---------------------------------------------------------------------------
+if(GS_BUILD_RECORD)
+    add_library(gspro_record record/gs_record.c)
+    add_library(gspro::gspro_record ALIAS gspro_record)
+    target_include_directories(gspro_record
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>)
+    target_link_libraries(gspro_record PUBLIC gspro)
+    target_link_libraries(gspro_record PRIVATE $<BUILD_INTERFACE:gs_build_flags>)
+    target_compile_definitions(gspro_record PRIVATE GSP_BUILDING_LIBRARY=1)
+    if(BUILD_SHARED_LIBS)
+        target_compile_definitions(gspro_record PUBLIC GSP_SHARED=1)
+    endif()
+    set_target_properties(gspro_record PROPERTIES
+        VERSION   ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+        C_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE ON)
+endif()
+
+# ---------------------------------------------------------------------------
 # gspro_ffi — ONE shared object for a language binding to dlopen.
 # ---------------------------------------------------------------------------
 if(GS_BUILD_FFI)
@@ -264,6 +296,9 @@ if(GS_INSTALL)
     if(GS_BUILD_NET)
         list(APPEND GS_INSTALL_TARGETS gspro_net)
     endif()
+    if(GS_BUILD_RECORD)
+        list(APPEND GS_INSTALL_TARGETS gspro_record)
+    endif()
     install(TARGETS ${GS_INSTALL_TARGETS} EXPORT gsproTargets
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -286,6 +321,12 @@ if(GS_INSTALL)
         configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tools/gspro-net.pc.in
                        ${CMAKE_CURRENT_BINARY_DIR}/gspro-net.pc @ONLY)
         install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gspro-net.pc
+                DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+    endif()
+    if(GS_BUILD_RECORD)
+        configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tools/gspro-record.pc.in
+                       ${CMAKE_CURRENT_BINARY_DIR}/gspro-record.pc @ONLY)
+        install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gspro-record.pc
                 DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
     endif()
 

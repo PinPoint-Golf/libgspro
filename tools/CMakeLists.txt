@@ -31,11 +31,31 @@ target_link_libraries(gs_abi_table PRIVATE gspro gs_build_flags)
 #
 # Needs GS_BUILD_NET: it is a host, and the socket lives there.
 # ---------------------------------------------------------------------------
-if(GS_BUILD_NET)
+if(GS_BUILD_NET AND GS_BUILD_RECORD)
     add_executable(gsplisten gsplisten.c)
-    target_link_libraries(gsplisten PRIVATE gspro_net gspro gs_build_flags)
+    # ⚠ It links the recorder too, because --record is the whole reason to run
+    # it beside a real launch monitor (design §11 package 7).
+    target_link_libraries(gsplisten PRIVATE gspro_net gspro_record gspro gs_build_flags)
+elseif(GS_BUILD_NET)
+    message(STATUS "gsplisten needs GS_BUILD_RECORD as well; not building it")
 else()
     message(STATUS "gsplisten needs GS_BUILD_NET; not building it")
+endif()
+
+# ---------------------------------------------------------------------------
+# gswire — read, replay and mine a .gswire capture.
+#
+# ⚠ `gswire replay` is the tool design §7 exists for: it drives a recorded
+# session back through THIS library and reports what it makes of it now, which
+# is how a fix to the decoder is checked against a real session without the
+# launch monitor that produced it.  `gswire extract` is how one of that
+# session's messages becomes a fixture in tests/fixtures/.
+# ---------------------------------------------------------------------------
+if(GS_BUILD_RECORD)
+    add_executable(gswire gswire.c)
+    target_link_libraries(gswire PRIVATE gspro_record gspro gs_build_flags)
+else()
+    message(STATUS "gswire needs GS_BUILD_RECORD; not building it")
 endif()
 
 # ⚠ The Python tools are not built, installed or byte-compiled by CMake — they

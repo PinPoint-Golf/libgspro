@@ -28,6 +28,7 @@
  */
 #include "gspro/gspro.h"
 #include "gspro/net.h"
+#include "gspro/record.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -60,6 +61,8 @@ typedef struct gs_options {
     double      write_spacing_s;
     long        max_connections;
     long        stop_after_shots;   /* 0 → until ctrl-c */
+    const char *record_path;        /* ⚠ a .gswire capture; off unless asked   */
+    const char *record_note;
 } gs_options;
 
 static void gs_usage(const char *argv0)
@@ -82,6 +85,10 @@ static void gs_usage(const char *argv0)
 "  --ack-text TEXT         ⚠ the real GSPro misspells it (protocol U4)\n"
 "  --max-connections N     0 → the library default\n"
 "  --shots N               exit after N shots (for scripts); 0 → until ctrl-c\n"
+"  --record FILE           ⚠ capture the BYTES to a .gswire file — what package 7\n"
+"                          is for.  Identifiers are redacted unless --identifiers\n"
+"  --note TEXT             a line in the capture's header: which device, which\n"
+"                          question it was taken to answer\n"
 "  --help\n",
         argv0, GSP_DEFAULT_PORT, GSP_ALT_PORT);
 }
@@ -141,6 +148,10 @@ static bool gs_parse_args(int argc, char **argv, gs_options *o, bool *done)
             o->max_connections = strtol(argv[++i], NULL, 10);
         } else if (strcmp(a, "--shots") == 0 && gs_need_value(argc, i, a)) {
             o->stop_after_shots = strtol(argv[++i], NULL, 10);
+        } else if (strcmp(a, "--record") == 0 && gs_need_value(argc, i, a)) {
+            o->record_path = argv[++i];
+        } else if (strcmp(a, "--note") == 0 && gs_need_value(argc, i, a)) {
+            o->record_note = argv[++i];
         } else {
             fprintf(stderr, "⛔ unknown or incomplete option: %s\n", a);
             gs_usage(argv[0]);
@@ -272,6 +283,34 @@ static void gs_handle_events(gsp_server *server, gsp_net *net, const gs_options 
 }
 
 /* ------------------------------------------------------------------------ */
+/*
+ * Drain the wire ring into the capture.  ⚠ EVERY POLL, not just at the end: the
+ * ring is drop-oldest (design §3.4), so a host that drains it lazily is a host
+ * that loses the beginning of the session it is recording — and the beginning
+ * is where the connect handshake and the first shot are.
+ */
+static void gs_drain_wire(gsp_server *server, gsp_recorder *rec, unsigned long *dropped)
+{
+    gsp_wire_chunk chunks[16];
+    size_t n;
+
+    if (rec == NULL) {
+        return;
+    }
+    while ((n = gsp_server_poll_wire(server, chunks, 16u)) > 0u) {
+        if (gsp_recorder_write(rec, chunks, n) < GSP_OK) {
+            /* ⚠ Said once, loudly, and the session continues: a launch monitor
+             * on a mat is not repeatable, so a full disk must not also cost the
+             * shots the operator is still hitting. */
+            if (*dropped == 0u) {
+                fprintf(stderr, "⚠ the capture cannot be written: %s\n",
+                        gsp_recorder_error(rec));
+            }
+            (*dropped)++;
+        }
+    }
+}
+
 static int gs_run(const gs_options *o)
 {
     gsp_server_config cfg = gsp_server_config_default();
@@ -282,6 +321,8 @@ static int gs_run(const gs_options *o)
     bool have_player = false;
     char error[GSP_NET_ERROR_MAX];
     unsigned long shots = 0;
+    unsigned long capture_failures = 0;
+    gsp_recorder *rec = NULL;
     gsp_net_stats stats;
 
     if (!gs_build_player(o, &player, &have_player)) {
@@ -295,6 +336,13 @@ static int gs_run(const gs_options *o)
     cfg.policy.reject_incomplete_shots = o->reject_incomplete;
     if (o->ack_text != NULL) {
         (void)snprintf(cfg.policy.ack_text, sizeof(cfg.policy.ack_text), "%s", o->ack_text);
+    }
+    if (o->record_path != NULL) {
+        /* ⚠ THE RING IS OFF UNLESS A CAPTURE IS ASKED FOR (design §7), so this
+         * is where it is sized.  256 chunks is ~140 KB and holds a burst of
+         * shots comfortably; the drain below runs every poll regardless. */
+        cfg.wire_ring = GSP_WIRE_RING_RECOMMENDED;
+        cfg.policy.record_identifiers = o->identifiers;
     }
     if (gsp_server_create(&cfg, &server) < GSP_OK) {
         fprintf(stderr, "⛔ the library refused this configuration\n");
@@ -324,8 +372,30 @@ static int gs_run(const gs_options *o)
         return 1;
     }
 
+    if (o->record_path != NULL) {
+        gsp_recording_info info = gsp_recording_info_default();
+        info.port = gsp_net_port(net);
+        info.identifiers_recorded = o->identifiers;
+        if (o->record_note != NULL) {
+            (void)snprintf(info.note, sizeof(info.note), "%s", o->record_note);
+        }
+        if (gsp_recorder_open(o->record_path, &info, &rec) < GSP_OK) {
+            fprintf(stderr, "⛔ cannot write the capture %s\n", o->record_path);
+            gsp_net_close(net);
+            gsp_server_close(server);
+            gsp_server_destroy(server);
+            return 1;
+        }
+    }
+
     printf("listening on %s:%u   (identifiers %s)\n", o->host, (unsigned)gsp_net_port(net),
            o->identifiers ? "SHOWN" : "redacted");
+    if (rec != NULL) {
+        /* ⚠ A capture taken with --identifiers carries a peer address and any
+         * DeviceID verbatim; design §9.2 is why that must be a decision. */
+        printf("recording to %s   (identifiers %s)\n", o->record_path,
+               o->identifiers ? "RECORDED — ⚠ redact before sharing" : "redacted");
+    }
     if (strcmp(o->host, "127.0.0.1") == 0 || strcmp(o->host, "localhost") == 0) {
         printf("⚠ loopback only — a launch monitor on ANOTHER MACHINE cannot reach "
                "this.  Use --host 0.0.0.0 (design §6.1).\n");
@@ -354,6 +424,7 @@ static int gs_run(const gs_options *o)
             break;
         }
         gs_handle_events(server, net, o, &shots);
+        gs_drain_wire(server, rec, &capture_failures);
         if (o->stop_after_shots > 0 && shots >= (unsigned long)o->stop_after_shots) {
             break;
         }
@@ -363,6 +434,19 @@ static int gs_run(const gs_options *o)
     gsp_net_close(net);
     gsp_server_close(server);
     gs_handle_events(server, NULL, o, &shots);   /* ⚠ drain once more: design §3.3 */
+    gs_drain_wire(server, rec, &capture_failures);
+    if (rec != NULL) {
+        uint64_t written = gsp_recorder_chunks(rec);
+        gsp_status closed = gsp_recorder_close(rec);
+        printf("capture: %llu chunk(s) to %s%s\n", (unsigned long long)written,
+               o->record_path,
+               (closed < GSP_OK) ? "  ⛔ INCOMPLETE — the file could not be finished" : "");
+        if (gsp_server_dropped_wire(server) > 0u) {
+            /* ⚠ A capture with holes is still evidence, but not of ABSENCE. */
+            printf("⚠ %u chunk(s) were dropped before they could be written; the "
+                   "capture has holes\n", gsp_server_dropped_wire(server));
+        }
+    }
     printf("\n%lu shot(s) received; %llu read(s) in, %llu write(s) out, "
            "%u event(s) dropped\n", shots, (unsigned long long)stats.reads,
            (unsigned long long)stats.writes, gsp_server_dropped_events(server));

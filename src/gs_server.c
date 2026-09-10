@@ -79,10 +79,13 @@ struct gsp_server {
 
     uint32_t event_sequence;
     uint32_t message_sequence;
+    uint32_t wire_sequence;    /* per CHUNK, so a reader sees a gap where one was */
     uint32_t dropped_events;
     uint32_t dropped_wire;
     uint8_t  drop_warned;      /* one WARN_EVENTS_DROPPED per overflow run */
-    uint8_t  reserved2[3];
+    uint8_t  wire_drop_warned; /* the same, for the wire ring                  */
+    uint8_t  wire_lost_pending;/* the ring emptied while a drop was owed       */
+    uint8_t  reserved2[1];
 
     gsp_player_info player;
     uint8_t         player_set;
@@ -202,6 +205,10 @@ static void emit_warning(gsp_server *s, gsp_conn_id conn, gsp_warning_code code,
     emit(s, &ev);
 }
 
+/* Defined with the wire log below; declared here because every connection
+ * event is also a line in the capture. */
+static void wire_meta(gsp_server *s, const gsp_event *ev);
+
 static void emit_connection(gsp_server *s, gsp_event_type type, const gs_conn *c,
                             gsp_close_cause cause, gsp_time_us now)
 {
@@ -213,6 +220,11 @@ static void emit_connection(gsp_server *s, gsp_event_type type, const gs_conn *c
     ev.u.connection.info = c->info;
     ev.u.connection.cause = (uint8_t)cause;
     emit(s, &ev);
+    /* ⚠ ONE HOOK COVERS ALL THREE: an open, a close the host reported, and the
+     * close gsp_server_close() reports for every connection still up.  A capture
+     * whose connections just stop, with no line saying why, cannot be read back
+     * as a session (design §7). */
+    wire_meta(s, &ev);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -278,6 +290,317 @@ static void drop_writes_for(gsp_server *s, gsp_conn_id conn)
  * (design §5.6), so a 201 with all of them unknown would be an empty Player
  * object — noise a client has to parse and learn nothing from.
  */
+/* ------------------------------------------------------------------------ */
+/* The wire log — design §7                                                  */
+/* ------------------------------------------------------------------------ */
+/*
+ * RECORD THE BYTES, NOT THE DECODED MESSAGES.  protocol §11 lists ten open
+ * questions, and when U2, U4 or U7 is answered a byte-level capture of the
+ * session that answered it RE-DECODES with the fix applied; a decoded log has
+ * already thrown away what the fix would have read differently.  The first
+ * capture against a real launch monitor is the fixture that pins the decoder,
+ * which is why this is a precondition for design §11's package 7 rather than a
+ * convenience.
+ *
+ * ⚠ A CHUNK IS ONE MESSAGE, ONE DISCARDED RUN, OR ONE REPLY — NOT ONE read().
+ * Read boundaries are the kernel's rather than the client's (design §3.2.1), so
+ * recording them would preserve an artefact; and redaction has to know where the
+ * DeviceID value SITS, which is knowable only once an object has been framed.
+ *
+ * ⚠ OFF UNLESS config.wire_ring SAYS OTHERWISE.  s->wire is NULL then and every
+ * function here returns before it copies a byte: a library that recorded a
+ * household's traffic because somebody turned on verbose logging would be a
+ * different kind of library (design §9.2).
+ */
+
+static bool wire_on(const gsp_server *s)
+{
+    return s->wire != NULL;
+}
+
+/* ⚠ The value is overwritten with THIS, repeated and cut to the value's own
+ * length, so the JSON still parses and every offset after it still holds — a
+ * capture whose lengths moved could not be compared with the event log or with
+ * a fixture promoted from it.  It contains no quote and no backslash, so it
+ * cannot end the string it replaces (design §9.2). */
+static const char GS_WIRE_MASK[] = "<redacted>";
+#define GS_WIRE_MASK_LEN 10u
+
+static bool wire_is_space(uint8_t b)
+{
+    return b == ' ' || b == '\t' || b == '\n' || b == '\r';
+}
+
+static bool wire_ci_equal(const uint8_t *p, const char *lit, size_t n)
+{
+    size_t i;
+    for (i = 0; i < n; ++i) {
+        uint8_t a = p[i];
+        uint8_t b = (uint8_t)lit[i];
+        if (a >= 'A' && a <= 'Z') {
+            a = (uint8_t)(a + 32);
+        }
+        if (a != b) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * Finds every DeviceID VALUE in a buffer, in order, without decoding it.
+ *
+ * ⚠ IT WORKS ON RAW BYTES BECAUSE IT MUST ALSO WORK ON BYTES THAT DID NOT
+ * PARSE.  A capture that omitted what the decoder rejected would omit the whole
+ * subject of the session it was taken to explain (conformance CT-W06) — so the
+ * discarded runs are recorded too, and a best-effort scan is what can redact
+ * them.  The key match is case-insensitive because the decoder's is (§9.1):
+ * [MLM] and [R10] each misspell a key's case and a redactor that were stricter
+ * than the parser would leak exactly the identifiers those clients send.
+ */
+typedef struct gs_redactor {
+    const uint8_t *buf;
+    size_t         len;
+    size_t         next;       /* where the next search starts               */
+    size_t         start, end; /* the current value's span                   */
+    bool           have;
+} gs_redactor;
+
+static void redactor_init(gs_redactor *r, const uint8_t *buf, size_t len)
+{
+    r->buf = buf;
+    r->len = len;
+    r->next = 0u;
+    r->start = 0u;
+    r->end = 0u;
+    r->have = false;
+}
+
+static bool redactor_next(gs_redactor *r)
+{
+    size_t i = r->next;
+
+    /* `"DeviceID"` is ten bytes; anything shorter cannot hold the key. */
+    while (r->len >= 10u && i + 10u <= r->len) {
+        size_t j;
+        size_t v;
+        if (r->buf[i] != '"' || !wire_ci_equal(r->buf + i + 1u, "deviceid", 8u)
+            || r->buf[i + 9u] != '"') {
+            i++;
+            continue;
+        }
+        j = i + 10u;
+        while (j < r->len && wire_is_space(r->buf[j])) {
+            j++;
+        }
+        if (j >= r->len || r->buf[j] != ':') {
+            i++;
+            continue;
+        }
+        j++;
+        while (j < r->len && wire_is_space(r->buf[j])) {
+            j++;
+        }
+        if (j >= r->len || r->buf[j] != '"') {
+            /* null, a number, anything that is not a string: nothing that could
+             * carry a serial, and not ours to rewrite. */
+            i++;
+            continue;
+        }
+        j++;
+        v = j;
+        while (v < r->len && r->buf[v] != '"') {
+            if (r->buf[v] == '\\' && v + 1u < r->len) {
+                v++;                      /* \" does not end the string        */
+            }
+            v++;
+        }
+        /* ⚠ A value with no closing quote — a truncated or hostile object —
+         * redacts to the end of the buffer.  OVER-redaction is the safe
+         * direction; under-redaction is a leak. */
+        r->start = j;
+        r->end = v;
+        r->next = (v < r->len) ? (v + 1u) : r->len;
+        r->have = true;
+        return true;
+    }
+    r->have = false;
+    r->next = r->len;
+    return false;
+}
+
+/*
+ * Masks whatever falls inside `dst`, which holds `buf[off .. off+n)`.  Returns
+ * true if anything was removed, which is what sets GSP_WIRE_REDACTED on that
+ * chunk — the flag says "something was taken OUT of this chunk", not "the
+ * session was redacted".
+ *
+ * ⚠ A value that straddles a chunk boundary is kept for the next chunk rather
+ * than consumed, and the mask is indexed from the value's own start, so the two
+ * halves of a long id still read as one repeated "<redacted>".
+ */
+static bool redactor_apply(gs_redactor *r, uint8_t *dst, size_t off, size_t n)
+{
+    const size_t end = off + n;
+    bool any = false;
+
+    for (;;) {
+        size_t a;
+        size_t b;
+        size_t k;
+
+        if (!r->have && !redactor_next(r)) {
+            return any;
+        }
+        if (r->end <= off) {
+            r->have = false;      /* entirely behind this chunk */
+            continue;
+        }
+        if (r->start >= end) {
+            return any;           /* not reached yet; keep it for a later chunk */
+        }
+        a = (r->start > off) ? r->start : off;
+        b = (r->end < end) ? r->end : end;
+        for (k = a; k < b; ++k) {
+            dst[k - off] = (uint8_t)GS_WIRE_MASK[(k - r->start) % GS_WIRE_MASK_LEN];
+        }
+        any = any || (b > a);
+        if (r->end > end) {
+            return any;           /* straddles: the next chunk finishes it */
+        }
+        r->have = false;
+    }
+}
+
+/*
+ * ⚠ DROP-OLDEST, AND THE SURVIVOR SAYS SO.  The wire ring is a log, not an
+ * acknowledgement path — unlike the write ring, which refuses (design §3.4).
+ * GSP_WIRE_LOST goes on the OLDEST SURVIVING chunk rather than the newcomer,
+ * because that is where the reader meets the gap; `sequence` says how big it
+ * was, which is why chunks carry one at all.
+ */
+static void wire_ring_push(gsp_server *s, const gsp_wire_chunk *chunk)
+{
+    gsp_wire_chunk *slot;
+
+    if (s->wire_count == s->wire_ring) {
+        s->wire_head = (s->wire_head + 1u) % s->wire_ring;
+        s->wire_count--;
+        s->dropped_wire++;
+        if (s->wire_count > 0u) {
+            s->wire[s->wire_head].flags |= (uint8_t)GSP_WIRE_LOST;
+        } else {
+            /* A ring of one: there is no survivor to mark, so the flag is owed
+             * to whatever arrives next. */
+            s->wire_lost_pending = 1u;
+        }
+        s->wire_drop_warned = s->wire_drop_warned ? 1u : 2u;
+    }
+    slot = &s->wire[(s->wire_head + s->wire_count) % s->wire_ring];
+    *slot = *chunk;
+    if (s->wire_lost_pending != 0u) {
+        slot->flags |= (uint8_t)GSP_WIRE_LOST;
+        s->wire_lost_pending = 0u;
+    }
+    s->wire_count++;
+
+    /* ⚠ Once per overflow run, exactly as the event ring does it: a warning per
+     * dropped chunk would fill the event ring with complaints about the wire
+     * ring.  gsp_server_dropped_wire() is always exact. */
+    if (s->wire_drop_warned == 2u) {
+        s->wire_drop_warned = 1u;
+        emit_warning(s, GSP_CONN_NONE, GSP_WARN_WIRE_DROPPED, s->dropped_wire,
+                     "wire ring overflowed; oldest chunks were dropped", s->now_us);
+    }
+}
+
+static void wire_push_bytes(gsp_server *s, gsp_conn_id conn, gsp_wire_direction direction,
+                            const uint8_t *data, size_t len, gsp_time_us now, bool redact,
+                            uint8_t extra_flags)
+{
+    gs_redactor r;
+    size_t off = 0u;
+
+    if (!wire_on(s)) {
+        return;
+    }
+    redactor_init(&r, data, len);
+    do {
+        gsp_wire_chunk chunk;
+        size_t n = len - off;
+
+        if (n > (size_t)GSP_WIRE_CHUNK_MAX) {
+            n = (size_t)GSP_WIRE_CHUNK_MAX;
+        }
+        memset(&chunk, 0, sizeof(chunk));
+        chunk.host_time_us = now;
+        chunk.conn = conn;
+        chunk.sequence = s->wire_sequence++;
+        chunk.direction = (uint8_t)direction;
+        chunk.flags = extra_flags;
+        chunk.length = (uint16_t)n;
+        if (n > 0u) {
+            memcpy(chunk.data, data + off, n);
+            if (redact && redactor_apply(&r, chunk.data, off, n)) {
+                chunk.flags |= (uint8_t)GSP_WIRE_REDACTED;
+            }
+        }
+        off += n;
+        if (off < len) {
+            chunk.flags |= (uint8_t)GSP_WIRE_CONTINUES;
+        }
+        wire_ring_push(s, &chunk);
+    } while (off < len);
+}
+
+/* Bytes a client sent: one framed object, or one run the framer threw away. */
+static void wire_client(gsp_server *s, gsp_conn_id conn, const uint8_t *data, size_t len,
+                        gsp_time_us now)
+{
+    if (!wire_on(s) || len == 0u) {
+        return;
+    }
+    wire_push_bytes(s, conn, GSP_WIRE_CLIENT_TO_SERVER, data, len, now,
+                    !s->policy.record_identifiers, 0u);
+}
+
+/*
+ * An open or a close, as one line of text.
+ *
+ * ⚠ IT IS gsp_event_format()'s OWN OUTPUT, and that is the point: the peer
+ * address is personal data (design §9.2) and the formatter is the code that
+ * already knows how to withhold it, is already tested for withholding it
+ * (test_api.c's redaction sweep), and cannot drift from what the event log says
+ * because it IS what the event log says.
+ */
+static void wire_meta(gsp_server *s, const gsp_event *ev)
+{
+    char line[256];
+    size_t n;
+    bool withheld;
+
+    if (!wire_on(s)) {
+        return;
+    }
+    /* ⚠ THE CONNECTION'S LIFE, NOT EVERY EVENT THAT CARRIES ONE.
+     * emit_connection() also builds GSP_EV_CLIENT_IDENTIFIED, and that one is a
+     * CONCLUSION rather than a fact on the wire: the DeviceID it reports is
+     * already in the recorded message bytes, three lines above it in the same
+     * capture.  A log that repeated the library's readings back to itself would
+     * be the decoded log design §7 exists to avoid. */
+    if (ev->type != (uint8_t)GSP_EV_CONNECTION_OPENED
+        && ev->type != (uint8_t)GSP_EV_CONNECTION_CLOSED) {
+        return;
+    }
+    n = gsp_event_format(ev, line, sizeof(line), s->policy.record_identifiers);
+    if (n >= sizeof(line)) {
+        n = sizeof(line) - 1u;
+    }
+    withheld = !s->policy.record_identifiers && gsp_event_is_sensitive(ev);
+    wire_push_bytes(s, ev->conn, GSP_WIRE_META, (const uint8_t *)line, n, ev->host_time_us,
+                    false, withheld ? (uint8_t)GSP_WIRE_REDACTED : 0u);
+}
+
 static bool player_has_anything(const gsp_player_info *p)
 {
     return p->handed != (uint8_t)GSP_HANDED_UNKNOWN ||
@@ -340,6 +663,9 @@ static void send_session_to(gsp_server *s, gs_conn *c, gsp_session_state state,
 /* Protocol errors                                                           */
 /* ------------------------------------------------------------------------ */
 
+static void wire_client(gsp_server *s, gsp_conn_id conn, const uint8_t *data, size_t len,
+                        gsp_time_us now);
+
 static void protocol_error(gsp_server *s, gs_conn *c, gsp_protocol_error_reason reason,
                            const uint8_t *snippet, size_t snippet_len, size_t discarded,
                            gsp_time_us now)
@@ -347,6 +673,13 @@ static void protocol_error(gsp_server *s, gs_conn *c, gsp_protocol_error_reason 
     gsp_event ev;
     const char *text;
     size_t n;
+
+    /* ⚠ WHAT FAILED IS RECORDED TOO (conformance CT-W06).  A capture taken to
+     * explain a client this library rejected, which left out the bytes it
+     * rejected, would leave out the entire subject.  Redaction still applies:
+     * gs_redactor scans raw bytes precisely so a malformed object cannot leak
+     * what a well-formed one would not. */
+    wire_client(s, c->info.conn, snippet, snippet_len, now);
 
     c->info.protocol_errors++;
     c->info.consecutive_errors++;
@@ -476,6 +809,11 @@ static bool deliver_message(gsp_server *s, gs_conn *c, const uint8_t *json, size
         protocol_error(s, c, GSP_PE_BAD_JSON, json, len, len, now);
         return false;
     }
+
+    /* ⚠ THE BYTES AS THEY ARRIVED, before anything this library concluded about
+     * them.  That is the whole value of the log: when protocol §11's U2 or U7 is
+     * answered, this re-decodes with the fix applied (design §7). */
+    wire_client(s, c->info.conn, json, len, now);
 
     m.conn = c->info.conn;
     m.sequence = s->message_sequence++;
@@ -1183,6 +1521,14 @@ size_t gsp_server_poll_writes(gsp_server *s, gsp_write_request *out, size_t max)
             continue;
         }
         out[n++] = *w;
+        /* ⚠ RECORDED HERE RATHER THAN AT QUEUE TIME, because this is the moment
+         * the bytes become the host's to write.  A reply held back by
+         * write_spacing_us therefore appears in the capture where it appears on
+         * the wire, and one addressed to a connection that went away before it
+         * was polled is discarded by drop_writes_for() and never recorded — it
+         * never went out (design §5.5). */
+        wire_push_bytes(s, w->conn, GSP_WIRE_SERVER_TO_CLIENT, w->data, (size_t)w->length,
+                        s->now_us, false, 0u);
         if (c != NULL && s->policy.write_spacing_us > 0) {
             c->next_write_us = s->now_us + s->policy.write_spacing_us;
         }
@@ -1226,13 +1572,16 @@ size_t gsp_server_poll_wire(gsp_server *s, gsp_wire_chunk *out, size_t max)
     if (s == NULL || out == NULL || max == 0u || s->wire == NULL) {
         return 0u;
     }
-    /* ⚠ The ring is sized here and drained here; nothing fills it yet.  The
-     * byte-level recorder is design §11's package 6, along with the .gswire
-     * container and the replay that drives a capture back through a server. */
+    /* Chunks are pushed by the wire-log section above: one per framed object,
+     * one per discarded run, one per reply as it is polled, and one META line
+     * per connection event.  ⚠ Drop-oldest and counted — see wire_ring_push(). */
     while (s->wire_count > 0u && n < max) {
         out[n++] = s->wire[s->wire_head];
         s->wire_head = (s->wire_head + 1u) % s->wire_ring;
         s->wire_count--;
+    }
+    if (s->wire_count == 0u) {
+        s->wire_drop_warned = 0u; /* a fresh overflow run earns a fresh warning */
     }
     return n;
 }

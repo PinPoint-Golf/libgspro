@@ -13,6 +13,7 @@ set(GS_TEST_SOURCES
     test_player.c     # CT-P01 .. CT-P12   201 and the 202/203 pair
     test_conn.c       # CT-C01 .. CT-C11   connection lifecycle
     test_robust.c     # CT-X01 .. CT-X07   hostile input, rings, ABI
+    test_wire.c       # CT-W01 .. CT-W12   the byte-level record (design §7)
     test_api.c        # the vocabulary tables and the ABI surface
 )
 
@@ -41,6 +42,29 @@ foreach(src ${GS_TEST_SOURCES})
     # and cross-check tests need no C at all.
     set_tests_properties(${name} PROPERTIES TIMEOUT 120 LABELS "conformance")
 endforeach()
+
+# ---------------------------------------------------------------------------
+# The .gswire container and the replay (design §7)
+#
+# ⚠ NO CT IDS, and the same rule as the four transport cases below: the
+# conformance document numbers what the PROTOCOL and its clients demand, and
+# this is a container of ours in an optional module.  What the CORE must record
+# is CT-W01..W12 in test_wire.c, which links nothing extra.
+# ---------------------------------------------------------------------------
+if(GS_BUILD_RECORD)
+    add_executable(test_record test_record.c)
+    target_link_libraries(test_record PRIVATE gspro_record gspro gs_build_flags)
+    target_include_directories(test_record PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/src)
+    target_compile_definitions(test_record PRIVATE
+        GS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+    add_test(NAME test_record COMMAND test_record)
+    # ⚠ Runs in its own directory: the cases write .gswire files and a failing
+    # run is meant to LEAVE them, which must not be in the source tree.
+    set_tests_properties(test_record PROPERTIES TIMEOUT 120 LABELS "conformance"
+                         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+endif()
 
 # ---------------------------------------------------------------------------
 # The host transport cases, against the C reference transport (conformance §3.8)
@@ -154,6 +178,22 @@ if(GS_BUILD_TOOLS AND GS_BUILD_FFI AND Python3_Interpreter_FOUND)
     # timeout is generous rather than tight.
     set_tests_properties(python_transport PROPERTIES TIMEOUT 420)
 
+    # ⚠ ONE FORMAT, TWO IMPLEMENTATIONS, CHECKED BOTH WAYS.  Python writes a
+    # capture here and the C `gswire` tool reads it; tests/test_gsplisten.py
+    # records with C and reads it with python/gspro/wire.py.  A container
+    # defined by exactly one program is defined by that program's bugs, and this
+    # one has to outlive a release — the capture it holds was taken beside a
+    # launch monitor that is not coming back (design §11 package 7).
+    if(GS_BUILD_RECORD)
+        add_test(NAME python_wire
+                 COMMAND ${Python3_EXECUTABLE}
+                         ${CMAKE_CURRENT_SOURCE_DIR}/test_python_wire.py
+                         $<TARGET_FILE:gspro_ffi>
+                         $<TARGET_FILE:gswire>)
+        set_tests_properties(python_wire PROPERTIES TIMEOUT 120 LABELS "conformance"
+                             ENVIRONMENT "PYTHONIOENCODING=utf-8")
+    endif()
+
     set_tests_properties(python_abi python_transport PROPERTIES LABELS "conformance")
 
     # ⚠ These harnesses report in the house style — ⚠, ⛔, § — and Windows gives
@@ -184,6 +224,9 @@ if(GS_BUILD_TOOLS AND GS_BUILD_FFI AND Python3_Interpreter_FOUND)
         # sanitizer job in CI is what covers them.
         if(APPLE AND GS_ENABLE_ASAN)
             set_tests_properties(python_abi python_transport PROPERTIES DISABLED TRUE)
+            if(GS_BUILD_RECORD)
+                set_tests_properties(python_wire PROPERTIES DISABLED TRUE)
+            endif()
             message(STATUS
                 "python binding tests: DISABLED under ASan on macOS — dyld refuses "
                 "to preload the Command Line Tools' ASan runtime into a ctypes host. "
@@ -233,7 +276,9 @@ endif()
 # path — and a tool that only ever runs by hand breaks between the times somebody
 # runs it.  It is the first thing a user meets with a launch monitor on the mat.
 # ---------------------------------------------------------------------------
-if(GS_BUILD_NET AND GS_BUILD_TOOLS AND Python3_Interpreter_FOUND)
+# ⚠ GS_BUILD_RECORD too: gsplisten links the recorder, because --record is the
+# whole reason to run it beside a real launch monitor, and this case drives it.
+if(GS_BUILD_NET AND GS_BUILD_RECORD AND GS_BUILD_TOOLS AND Python3_Interpreter_FOUND)
     add_test(NAME gsplisten
              COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_gsplisten.py
                      $<TARGET_FILE:gsplisten> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)

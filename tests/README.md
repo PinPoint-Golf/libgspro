@@ -3,9 +3,9 @@
 # The conformance suite
 
 The executable form of [`../docs/conformance.md`](../docs/conformance.md): the CT- cases over
-nine C binaries and two Python programs (the ABI pin and the host-transport cases), plus a
-smoke test of the `gsplisten` tool, the sans-I/O gate and two cross-checks that need no C at
-all.  `ctest --preset dev` runs 15 tests.
+ten C binaries and three Python programs (the ABI pin, the host-transport cases and the
+container cross-check), plus a smoke test of the `gsplisten` tool, the sans-I/O gate and two
+cross-checks that need no C at all.  `ctest --preset dev` runs 18 tests.
 
 ⚠ **The host-transport family runs TWICE, against two adapters** (conformance §3.8): once on
 the asyncio reference transport and once on the C one, which share no code below the socket.
@@ -42,11 +42,14 @@ which has not happened yet.
 | `test_player.c` | CT-P — the 201 and the 202/203 pair |
 | `test_conn.c` | CT-C — connection lifecycle |
 | `test_robust.c` | CT-X — hostile input, ring behaviour, ABI |
+| `test_wire.c` | CT-W — the byte-level record: what is captured, what is redacted, what a full ring drops |
 | `test_api.c` | The vocabulary tables, the redaction sweep, the documented defaults |
 | `test_python_abi.py` | The ctypes binding's structs, offsets, enums and bounds against `tools/gs_abi_table.c` — the compiler's own layout (CT-X07) |
 | `test_python_transport.py` | CT-T — a host driving a real socket: reply latency, one write per message, spacing, a client vanishing mid-message. Adapter: the **asyncio** transport |
 | `test_net.c` | The same CT-T rows against the **C** reference transport (`gspro_net`, `GS_BUILD_NET`), plus four cases about the transport's own contract. Both ends run on one thread, so a failure is reproducible rather than a race |
 | `gs_net_client.h` | The client half of those: a launch monitor simulator in C, framing replies with the library's own `gsp_frame_find()` |
+| `test_record.c` | The `.gswire` container and `gsp_replay_into_server()` (`GS_BUILD_RECORD`). ⚠ No CT ids: it is our container, not the protocol |
+| `test_python_wire.py` | The container written in **Python** and read by the C `gswire` tool — the other direction is in `test_gsplisten.py`. A format defined by one program is defined by that program's bugs |
 | `test_gsplisten.py` | The `gsplisten` tool end to end, as a user runs it — arguments, the announced port, the 201/202/200 a client sees, redaction, the exit path. ⚠ No CT id: it is our tool, not the protocol |
 | `test_fixtures.py` | The fixtures checked against the protocol document **in Python**, so the evidence and the decoder cannot be wrong together |
 | `test_coverage.py` | Every `CT-` row in the document has a case and every case has a row. ⚠ A case may be deferred, but only by id and with a reason, in that file |

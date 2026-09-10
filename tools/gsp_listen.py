@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import signal
 import sys
 from pathlib import Path
 
@@ -35,6 +36,7 @@ sys.path.insert(0, str(ROOT / "python"))
 
 import gspro  # noqa: E402
 from gspro.asyncio_transport import AsyncioTransport  # noqa: E402
+from gspro.wire import Recording, Writer  # noqa: E402
 
 
 def build_player(args) -> gspro.PlayerInfo | None:
@@ -60,14 +62,31 @@ async def run(args) -> int:
         write_spacing_us=int(args.write_spacing * 1_000_000),
         reject_incomplete_shots=args.reject_incomplete,
         ack_text=args.ack_text or "",
+        # ⚠ THE WIRE LOG IS OFF UNLESS A CAPTURE IS ASKED FOR (design §7).
+        wire_ring=gspro.GSP_WIRE_RING_RECOMMENDED if args.record else 0,
+        record_identifiers=bool(args.record and args.identifiers),
     )
 
+    writer = None
+    if args.record:
+        writer = Writer(args.record, Recording(
+            port=args.port, identifiers_recorded=bool(args.identifiers),
+            note=args.note or ""))
+
     shots = 0
+
+    def capture() -> None:
+        """⚠ EVERY TIME ROUND, not at the end: the ring is drop-OLDEST, so a
+        host that drains it lazily loses the start of the session it is
+        recording — which is where the handshake and the first shot are."""
+        if writer is not None:
+            writer.write(server.drain_wire())
 
     def on_event(ev: gspro.Event) -> None:
         nonlocal shots
         if ev.type == gspro.EventType.SHOT:
             shots += 1
+        capture()
         line = ev.format(args.identifiers)
         mark = "⚠ " if ev.type in (
             gspro.EventType.PROTOCOL_ERROR,
@@ -101,6 +120,12 @@ async def run(args) -> int:
 
     print(f"listening on {args.host}:{transport.port}"
           f"   (identifiers {'SHOWN' if args.identifiers else 'redacted'})", flush=True)
+    if writer is not None:
+        # ⚠ A capture taken with --identifiers holds a peer address and any
+        # DeviceID verbatim; design §9.2 is why that has to be a decision.
+        print(f"recording to {args.record}   (identifiers "
+              + ("RECORDED — ⚠ redact before sharing" if args.identifiers else "redacted")
+              + ")", flush=True)
 
     player = build_player(args)
     if player is not None:
@@ -113,8 +138,19 @@ async def run(args) -> int:
         await transport.set_session_state(gspro.SessionState.ACTIVE)
         print("session: ACTIVE (202 sent — [OSP]-style clients arm on this)", flush=True)
 
+    # ⚠ A SIGNAL MUST REACH THE `finally` BELOW, or a --record session dies with
+    # its capture still in a buffer.  ctrl-c raises KeyboardInterrupt through
+    # asyncio.run(), but SIGTERM — what a supervisor, a script or `pkill` sends —
+    # terminates CPython outright and unwinds nothing.
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except (NotImplementedError, AttributeError):   # Windows has neither
+            pass
     try:
-        await asyncio.Event().wait()  # until ctrl-c
+        await stop.wait()
     except asyncio.CancelledError:
         pass
     finally:
@@ -123,6 +159,14 @@ async def run(args) -> int:
         server.close()
         for ev in server.drain_events():  # ⚠ drain once more: design §3.3
             print(f"  {ev.format(args.identifiers)}", flush=True)
+        capture()                          # ⚠ and the wire ring once more too
+        if writer is not None:
+            writer.close()
+            print(f"capture: {writer.chunks} chunk(s) to {args.record}", flush=True)
+            if server.dropped_wire():
+                # A capture with holes is still evidence, but not of ABSENCE.
+                print(f"⚠ {server.dropped_wire()} chunk(s) were dropped before they "
+                      "could be written; the capture has holes", flush=True)
         server.destroy()
     return 0
 
@@ -150,6 +194,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="⚠ answer an incomplete shot 501; a client may retry forever")
     ap.add_argument("--ack-text", help="⚠ the real GSPro misspells it (protocol U4)")
     ap.add_argument("--max-connections", type=int, default=0, help="0 → 4")
+    ap.add_argument("--record", metavar="FILE",
+                    help="⚠ capture the BYTES to a .gswire file — what package 7 is for")
+    ap.add_argument("--note", help="a line in the capture's header: which device, and "
+                                   "which question it was taken to answer")
     args = ap.parse_args(argv)
 
     try:

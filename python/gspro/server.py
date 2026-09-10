@@ -329,6 +329,20 @@ class Server:
         n = lib.gsp_server_poll_wire(self._handle, out, max_count)
         return [T.gsp_wire_chunk.from_buffer_copy(out[i]) for i in range(n)]
 
+    def drain_wire(self) -> Iterator[T.gsp_wire_chunk]:
+        """Every chunk, however many polls that takes.
+
+        ⚠ DRAIN IT EVERY TIME ROUND THE LOOP, not at the end: the wire ring is
+        drop-OLDEST (design §3.4), so a host that drains it lazily loses the
+        beginning of the session it is recording — and the beginning is where
+        the connect handshake and the first shot are.
+        """
+        while True:
+            batch = self.poll_wire()
+            if not batch:
+                return
+            yield from batch
+
     def dropped_events(self) -> int:
         return lib.gsp_server_dropped_events(self._handle)
 
