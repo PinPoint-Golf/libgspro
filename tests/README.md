@@ -36,12 +36,14 @@ still standing in:
 | `test_robust.c` | CT-X — hostile input, ring behaviour, ABI |
 | `test_api.c` | The vocabulary tables, the redaction sweep, the documented defaults |
 | `test_fixtures.py` | The fixtures checked against the protocol document **in Python**, so the evidence and the decoder cannot be wrong together |
+| `test_coverage.py` | Every `CT-` row in the document has a case and every case has a row. ⚠ A case may be deferred, but only by id and with a reason, in that file |
 | `purity.cmake` | The library must not reference `socket`, `bind`, `accept`, a clock, a thread or a file |
 | `fixtures/` | 23 byte-exact messages, one per client in the survey. [Provenance](fixtures/README.md) |
 
 ## Labels
 
-`ctest -L ready` runs what must pass today — the purity gate and the fixture cross-check.
+`ctest -L ready` runs what must pass today — the purity gate, the fixture cross-check and the
+coverage cross-check.
 `ctest -L conformance` runs the specification. CI blocks on the first and reports the second
 as a count, because a job that is always red teaches everyone to ignore it.
 

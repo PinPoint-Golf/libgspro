@@ -53,20 +53,30 @@ jobs:
       - uses: actions/checkout@v4
       - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
       - run: cmake --build build --parallel
+      # ⚠ `shell: bash` rather than the default `bash -e`, and an explicit exit 0.
+      # A progress report must not be able to fail: `grep -c` exits 1 on zero
+      # matches, which under -e aborted this step and turned the whole run red
+      # for a job whose only purpose is to print a number.
       - name: Count green cases
+        shell: bash
         run: |
+          set +e
           total=0; green=0
           for t in build/tests/test_*; do
             [ -x "$t" ] || continue
-            out=$("$t" 2>/dev/null || true)
-            total=$((total + $(printf '%s\n' "$out" | grep -c '^\[')))
-            green=$((green + $(printf '%s\n' "$out" | grep -c '^\[ ok \]')))
+            out=$("$t" 2>/dev/null)
+            n=$(printf '%s\n' "$out" | grep -c '^\[')
+            g=$(printf '%s\n' "$out" | grep -c '^\[ ok \]')
+            total=$((total + n)); green=$((green + g))
           done
-          echo "## Conformance: $green / $total cases green" >> "$GITHUB_STEP_SUMMARY"
           echo "conformance: $green / $total cases green"
-          if [ "$green" -eq "$total" ]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "⚠ Every case is green — delete \`src/gs_unimplemented.c\`, replace the" \
-                 "discovered source list in CMakeLists.txt with a literal one, and make" \
-                 "the conformance suite the CI gate (drop \`-L ready\`)." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          {
+            echo "## Conformance: $green / $total cases green"
+            if [ "$total" -gt 0 ] && [ "$green" -eq "$total" ]; then
+              echo
+              echo "⚠ Every case is green. Delete \`src/gs_unimplemented.c\`, replace the"
+              echo "discovered source list in CMakeLists.txt with a literal one, and make"
+              echo "the conformance suite the CI gate by dropping \`-L ready\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0

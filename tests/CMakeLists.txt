@@ -75,6 +75,15 @@ if(Python3_Interpreter_FOUND)
                      ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
     set_tests_properties(fixtures PROPERTIES ENVIRONMENT "PYTHONIOENCODING=utf-8"
                          LABELS "ready")
+    # ⚠ THE SUITE'S OWN COMPLETENESS IS A TEST, because nothing else can be: a
+    # CT- row added to the document with no case is a claim nobody checks, and
+    # a case with no row is a preference somebody encoded without saying which
+    # client demands it.  Both read as ordinary work and neither fails anything.
+    add_test(NAME coverage
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_coverage.py
+                     ${CMAKE_SOURCE_DIR})
+    set_tests_properties(coverage PROPERTIES ENVIRONMENT "PYTHONIOENCODING=utf-8"
+                         LABELS "ready")
 else()
-    message(STATUS "no python3: the fixture cross-check will not run")
+    message(STATUS "no python3: the fixture and coverage cross-checks will not run")
 endif()
