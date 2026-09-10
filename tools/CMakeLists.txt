@@ -21,6 +21,23 @@
 add_executable(gs_abi_table gs_abi_table.c)
 target_link_libraries(gs_abi_table PRIVATE gspro gs_build_flags)
 
+# ---------------------------------------------------------------------------
+# gsplisten — a complete listener, in C, on the reference transport.
+#
+# ⚠ THE C TWIN OF tools/gsp_listen.py, and it exists because the Python one
+# needs Python.  A PiTrac, a NAS or a Windows box with a compiler and nothing
+# else can still meet a launch monitor with this, which is the situation
+# design §11's package 7 (FIRST CONTACT) is most likely to be run in.
+#
+# Needs GS_BUILD_NET: it is a host, and the socket lives there.
+# ---------------------------------------------------------------------------
+if(GS_BUILD_NET)
+    add_executable(gsplisten gsplisten.c)
+    target_link_libraries(gsplisten PRIVATE gspro_net gspro gs_build_flags)
+else()
+    message(STATUS "gsplisten needs GS_BUILD_NET; not building it")
+endif()
+
 # ⚠ The Python tools are not built, installed or byte-compiled by CMake — they
 # are scripts that find the shared object at run time (python/gspro/_library.py)
 # and are meant to be copied out of this repository:

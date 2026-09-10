@@ -144,6 +144,17 @@ non-Qt user has something that runs out of the box and so that the command line 
 Python exemplar have a socket; they are separate targets and linking none of them is the
 expected case.
 
+`gspro_net` is `net/gs_net.c` behind `GS_BUILD_NET`, and `include/gspro/net.h` is its whole
+API: `gsp_net_open()` binds, `gsp_net_poll()` runs one pass — select, accept, read, tick, drain
+the write ring onto the sockets — and everything else stays where it was. ⚠ **It does not drain
+events**: acting on `GSP_EV_CLOSE_REQUESTED` means closing a socket and that decision is the
+application's, so the application sees the event and calls `gsp_net_close_connection()`. It
+supplies the monotonic clock (`gsp_net_now_us()`) that the core is forbidden to read, and it is
+a separate archive from `gspro` precisely so that `tests/purity.cmake` stays meaningful: this
+object is made of the symbols that gate forbids. ⚠ **`gsplisten` is its CLI and the C twin of
+`tools/gsp_listen.py`** — the same session with a real device on the mat, on a machine with a
+compiler and no Python.
+
 ### 3.2 The transport contract
 
 There is no abstract transport class. The host calls in; the library queues out.
@@ -829,8 +840,10 @@ listener with `asyncio` and drives `gsp_shoot.py` at it.
 
 ## 11. Implementation plan and status
 
-⚠ **Status: the core is built and the whole conformance suite is green** — 103 cases, clean
-under `--preset dev` and `--preset san`. ⚠ **It has still never met a launch monitor**, which
+⚠ **Status: the core, the Python binding and the reference net transport are built, and the
+whole conformance suite is green** — 103 socket-free cases, the host-transport family twice
+over (nine cases against the asyncio adapter and the same nine plus four against the C one),
+clean under `--preset dev` and `--preset san`. ⚠ **It has still never met a launch monitor**, which
 is package 7 and the only thing that can close protocol §11's unknowns. This document and
 `protocol.md` were the first deliverable and the public headers the second, written *from* this
 design so that the API was reviewable before any of it ran.
@@ -849,7 +862,7 @@ appears.
 | 2 | **Framer + decoder** ✅ | `src/gs_frame.c`, `src/gs_decode.c`, `src/gs_encode.c`, `src/gs_misc.c` — turns CT-D, CT-K and the API family green, and CT-F apart from the two rows that drive a server | 1b |
 | 3 | **Server** ✅ | `src/gs_server.c`: connections, replies, player info, session state, events, idle alarm — turns CT-R, CT-P, CT-C, CT-X and the rest of CT-F green | 2 |
 | 4 | **FFI + Python** ✅ | `gspro_ffi` target, `python/gspro/`, `tools/gs_abi_table.c` + `tests/test_python_abi.py`, `gsp_listen.py`, `gsp_shoot.py`, asyncio transport — and nine of the ten CT-T rows, which had nothing to run against until there was a socket | 3 |
-| 5 | Reference net transport + tool | `gspro_net` (POSIX/Winsock), `gsplisten` CLI | 3 |
+| 5 | **Reference net transport + tool** ✅ | `gspro_net` — `net/gs_net.c` and `include/gspro/net.h`, one `select()` loop behind `GS_BUILD_NET` — the `gsplisten` CLI, and the CT-T rows run a SECOND time against it (`tests/test_net.c`) | 3 |
 | 6 | Wire log + record | `poll_wire`, `gspro_record`, `.gswire`, replay | 3 |
 | 7 | **First contact** | A session against at least one real connector ([MLM] or [R10] with its device, or PiTrac) captured to `.gswire`; §11 of the protocol document updated with what was learned; fixtures promoted from the capture | 4 or 5, 6 |
 | 8 | PinPoint Studio | `Kind::GsPro`, `GsProMonitor`, the mapping of §6, the settings panel, the CMake block | 3, and 7 for confidence |
@@ -872,7 +885,10 @@ answering U1–U10 rather than debugging framing.
 | `gspro/codec.h` | Stateless framing, decoding and encoding — public so tools, tests and bindings can parse without a server |
 | `gspro/event.h` | `gsp_event` and its payloads, `gsp_event_format()`, `gsp_event_is_sensitive()` |
 | `gspro/server.h` | The server, the threading contract, the transport contract, policy, config, rings, `gsp_wire_chunk` |
+| `gspro/net.h` | ⚠ **Not the core.** The optional reference transport (`gspro_net`, `GS_BUILD_NET`): `gsp_net_open/poll/close`, `gsp_net_config`, `gsp_net_stats`, and the monotonic clock the core may not read. A consumer that has its own socket loop never includes it |
 
 Internal, reachable from tests: `src/gs_frame.h` (the incremental framer the server keeps per
 connection, and which `gsp_frame_find()` drives from a clean state so the stateless and
-incremental halves cannot disagree), `src/gs_json.h` (the bounded reader).
+incremental halves cannot disagree), `src/gs_json.h` (the bounded reader), and — for the
+transport and for the C client half of the CT-T cases, never for `src/` — `net/gs_net_sys.h`,
+which holds the whole of the POSIX/Winsock difference in one place.

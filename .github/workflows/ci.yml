@@ -11,8 +11,12 @@ jobs:
   # ⚠ THE CONFORMANCE SUITE IS THE GATE.  It ran behind a `-L ready` filter
   # while the library was being written, because the suite came first (design
   # §11 package 1b) and a job that is always red teaches everyone to ignore it.
-  # Every source group has landed, so all 103 cases run on every platform and a
-  # red build is a real regression.
+  # Every source group has landed, so all 103 socket-free cases run on every
+  # platform and a red build is a real regression — and since package 5 so do the
+  # host-transport cases against the C reference transport (tests/test_net.c) and
+  # the gsplisten smoke test, which are the only jobs here that open a socket.
+  # ⚠ They bind 127.0.0.1 on an EPHEMERAL port: a runner with 921 held, or with
+  # no route to the LAN, must not be a red build.
   # ---------------------------------------------------------------------------
   build:
     name: ${{ matrix.name }}
@@ -70,7 +74,32 @@ jobs:
           find_package(gspro CONFIG REQUIRED)
           add_executable(consumer main.c)
           target_link_libraries(consumer PRIVATE gspro::gspro)
+          # ⚠ The reference transport is a SECOND target and a second link line,
+          # exported by the same package.  It was installed by the build above
+          # (GS_BUILD_NET defaults ON when top-level), so an export set that
+          # forgot it, or a header the install rules missed, fails right here.
+          add_executable(consumer_net main_net.c)
+          target_link_libraries(consumer_net PRIVATE gspro::gspro_net gspro::gspro)
           CMAKE
+          cat > _consumer/main_net.c <<'MAIN'
+          #include "gspro/gspro.h"
+          #include "gspro/net.h"
+          #include <stdio.h>
+          int main(void) {
+              gsp_server_config sc = gsp_server_config_default();
+              gsp_net_config nc = gsp_net_config_default();
+              gsp_server *s = NULL; gsp_net *n = NULL;
+              char why[GSP_NET_ERROR_MAX];
+              if (gsp_server_create(&sc, &s) != GSP_OK) return 1;
+              nc.host = "127.0.0.1"; nc.ephemeral_port = true;
+              if (gsp_net_open(s, &nc, &n, why, sizeof(why)) != GSP_OK) {
+                  printf("gsp_net_open: %s\n", why); return 1;
+              }
+              printf("listening on 127.0.0.1:%u\n", gsp_net_port(n));
+              gsp_net_close(n); gsp_server_close(s); gsp_server_destroy(s);
+              return 0;
+          }
+          MAIN
           cat > _consumer/main.c <<'MAIN'
           #include "gspro/gspro.h"
           #include <stdio.h>
@@ -87,12 +116,18 @@ jobs:
           cmake -S _consumer -B _consumer/build -DCMAKE_PREFIX_PATH=$PWD/_inst
           cmake --build _consumer/build
           ./_consumer/build/consumer
+          ./_consumer/build/consumer_net
       - name: Consume via pkg-config
         run: |
           export PKG_CONFIG_PATH=$PWD/_inst/lib/pkgconfig
           test "$(pkg-config --modversion gspro)" = "0.1.0"
           cc _consumer/main.c $(pkg-config --cflags --libs gspro) -o _pc_consumer
           ./_pc_consumer
+          # ⚠ The transport is its OWN module, so that `--libs gspro` never hands
+          # a socket loop to a host that has one of its own.
+          test "$(pkg-config --modversion gspro-net)" = "0.1.0"
+          cc _consumer/main_net.c $(pkg-config --cflags --libs gspro-net) -o _pc_net
+          ./_pc_net
 
   # ---------------------------------------------------------------------------
   # How much of the specification the library satisfies, as a number in the run

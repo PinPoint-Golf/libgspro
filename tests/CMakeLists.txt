@@ -43,6 +43,40 @@ foreach(src ${GS_TEST_SOURCES})
 endforeach()
 
 # ---------------------------------------------------------------------------
+# The host transport cases, against the C reference transport (conformance §3.8)
+#
+# ⚠ THE SAME TEN ROWS AS tests/test_python_transport.py, AND THAT IS THE DESIGN.
+# CT-T is the one family that is about a HOST rather than about the library —
+# reply latency, one send() per message, holding a 200 apart from a 201, a
+# client that vanishes mid-message — so it is run ONCE PER HOST ADAPTER.  The
+# asyncio adapter went green in package 4; this is the same checklist pointed at
+# net/gs_net.c, which shares no code with it below the socket.  PinPoint's
+# QTcpServer adapter is the third run and lives in PinPoint.
+#
+# ⚠ It builds ONLY with GS_BUILD_NET, and it is the one binary in this directory
+# that links a socket: `purity` below runs on `gspro`, which this deliberately is
+# not.
+# ---------------------------------------------------------------------------
+if(GS_BUILD_NET)
+    add_executable(test_net test_net.c)
+    target_link_libraries(test_net PRIVATE gspro_net gspro gs_build_flags)
+    target_include_directories(test_net PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/src
+        # ⚠ The client half (gs_net_client.h) uses the SAME platform shim the
+        # transport does.  A second copy of "Windows spells it differently" is a
+        # second place to get it wrong.
+        ${CMAKE_SOURCE_DIR}/net)
+    target_compile_definitions(test_net PRIVATE
+        GS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+    add_test(NAME test_net COMMAND test_net)
+    # ⚠ CT-T05 observes a real silence: five seconds by default, and GSP_SOAK=1
+    # runs the full five minutes the row names — which is why this is generous
+    # rather than the 120 s the socket-free cases get.
+    set_tests_properties(test_net PROPERTIES TIMEOUT 420 LABELS "conformance")
+endif()
+
+# ---------------------------------------------------------------------------
 # The sans-I/O gate (design §2, conformance CT-X06)
 #
 # ⚠ Runs on `gspro`, the target every C consumer links.  Never point it at
@@ -185,4 +219,24 @@ if(GS_BUILD_TOOLS AND GS_BUILD_FFI AND Python3_Interpreter_FOUND)
     endif()
 elseif(Python3_Interpreter_FOUND)
     message(STATUS "python binding tests need GS_BUILD_TOOLS and GS_BUILD_FFI")
+endif()
+
+# ---------------------------------------------------------------------------
+# gsplisten, end to end, as a user runs it
+#
+# ⚠ BELOW find_package(Python3), because it needs the interpreter it finds.
+#
+# ⚠ NOT A CONFORMANCE CASE and carries no CT id: the document numbers what the
+# protocol and its clients demand, not what our own tools do.  It is here because
+# test_net above exercises the TRANSPORT by linking it, and nothing exercised the
+# TOOL — its arguments, its bind-failure report, its event printing, its exit
+# path — and a tool that only ever runs by hand breaks between the times somebody
+# runs it.  It is the first thing a user meets with a launch monitor on the mat.
+# ---------------------------------------------------------------------------
+if(GS_BUILD_NET AND GS_BUILD_TOOLS AND Python3_Interpreter_FOUND)
+    add_test(NAME gsplisten
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_gsplisten.py
+                     $<TARGET_FILE:gsplisten> ${CMAKE_CURRENT_SOURCE_DIR}/fixtures)
+    set_tests_properties(gsplisten PROPERTIES TIMEOUT 120 LABELS "conformance"
+                         ENVIRONMENT "PYTHONIOENCODING=utf-8")
 endif()

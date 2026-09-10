@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2026 Mark Liversedge
+#
+# The OPTIONAL reference socket transport (design §3.1), installed only when
+# GS_BUILD_NET built it.
+#
+# ⚠ A SEPARATE MODULE BECAUSE LINKING IT IS THE EXCEPTION.  `pkg-config --libs
+# gspro` must not drag a socket loop into a Qt or asyncio host that has its own;
+# a consumer that wants this one asks for it by name.
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: gspro-net
+Description: @PROJECT_DESCRIPTION@ — reference POSIX/Winsock transport
+Version: @PROJECT_VERSION@
+Requires: gspro
+# ⚠ Winsock is not here: on the one platform that needs -lws2_32, pkg-config is
+# not how anybody links.  The CMake package carries it on the target instead.
+Libs: -L${libdir} -lgspro_net
+Cflags: -I${includedir}

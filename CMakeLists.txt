@@ -31,6 +31,11 @@ endif()
 option(GS_BUILD_TESTS     "Build the conformance suite"              ${GS_IS_TOP_LEVEL})
 option(GS_BUILD_TOOLS     "Build the command line tools"             ${GS_IS_TOP_LEVEL})
 option(GS_BUILD_FFI       "Build the shared object the Python binding loads" ${GS_IS_TOP_LEVEL})
+# ⚠ The reference socket transport, and OFF for a consumer by design.  It is the
+# one target in this project that opens a socket, reads a clock and would fail
+# tests/purity.cmake; PinPoint Studio drives the same server from QTcpServer and
+# must never link it by accident (design §3.1).
+option(GS_BUILD_NET       "Build the reference socket transport (gspro_net)" ${GS_IS_TOP_LEVEL})
 option(GS_ENABLE_ASAN     "Build with AddressSanitizer"              OFF)
 option(GS_ENABLE_UBSAN    "Build with UndefinedBehaviorSanitizer"    OFF)
 option(GS_ENABLE_COVERAGE "Build with gcov coverage instrumentation" OFF)
@@ -156,6 +161,48 @@ if(NOT WIN32)
 endif()
 
 # ---------------------------------------------------------------------------
+# gspro_net — the reference POSIX/Winsock select() transport (design §3.1).
+#
+# ⚠ A SEPARATE TARGET BECAUSE LINKING IT IS THE EXCEPTION.  Layer 1 is the whole
+# library as far as a consumer is concerned; this is layer 3, one of three host
+# adapters (the others are python/gspro/asyncio_transport.py and PinPoint's own
+# QTcpServer one, which lives in PinPoint).  It exists so a non-Qt user has
+# something that runs out of the box, and so `gsplisten` and the CT-T
+# host-transport cases have a socket in C to run against.
+#
+# ⚠ IT LINKS THE CORE PUBLICLY AND IS NEVER FOLDED INTO IT.  tests/purity.cmake
+# fails the build if `gspro` ever references socket(), select() or
+# clock_gettime(); this object is made of them.  Keeping them in different
+# archives is what keeps that gate meaningful.
+# ---------------------------------------------------------------------------
+if(GS_BUILD_NET)
+    add_library(gspro_net net/gs_net.c)
+    add_library(gspro::gspro_net ALIAS gspro_net)
+    target_include_directories(gspro_net
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+            $<INSTALL_INTERFACE:include>
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/net)
+    target_link_libraries(gspro_net PUBLIC gspro)
+    target_link_libraries(gspro_net PRIVATE $<BUILD_INTERFACE:gs_build_flags>)
+    target_compile_definitions(gspro_net PRIVATE GSP_BUILDING_LIBRARY=1)
+    if(BUILD_SHARED_LIBS)
+        target_compile_definitions(gspro_net PUBLIC GSP_SHARED=1)
+    endif()
+    # ⚠ PUBLIC: a static gspro_net leaves the Winsock symbols to its consumer,
+    # exactly as -lm is public on the core.
+    if(WIN32)
+        target_link_libraries(gspro_net PUBLIC ws2_32)
+    endif()
+    set_target_properties(gspro_net PROPERTIES
+        VERSION   ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+        C_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE ON)
+endif()
+
+# ---------------------------------------------------------------------------
 # gspro_ffi — ONE shared object for a language binding to dlopen.
 # ---------------------------------------------------------------------------
 if(GS_BUILD_FFI)
@@ -210,7 +257,14 @@ endif()
 # tree and gspro.pc into a bundle nobody meant to put them in.
 if(GS_INSTALL)
     include(GNUInstallDirs)
-    install(TARGETS gspro EXPORT gsproTargets
+    set(GS_INSTALL_TARGETS gspro)
+    # ⚠ Only if it was built.  An export set naming a target that does not exist
+    # fails the whole install, which is the class of bug the install CI job was
+    # added to catch (see the note above install(DIRECTORY)).
+    if(GS_BUILD_NET)
+        list(APPEND GS_INSTALL_TARGETS gspro_net)
+    endif()
+    install(TARGETS ${GS_INSTALL_TARGETS} EXPORT gsproTargets
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -224,6 +278,16 @@ if(GS_INSTALL)
                    ${CMAKE_CURRENT_BINARY_DIR}/gspro.pc @ONLY)
     install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gspro.pc
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+
+    # ⚠ A SECOND MODULE RATHER THAN A LINE IN THE FIRST.  `pkg-config --libs
+    # gspro` must not hand a socket loop to a Qt or asyncio host that has its
+    # own; a consumer that wants the reference transport asks for it by name.
+    if(GS_BUILD_NET)
+        configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tools/gspro-net.pc.in
+                       ${CMAKE_CURRENT_BINARY_DIR}/gspro-net.pc @ONLY)
+        install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gspro-net.pc
+                DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+    endif()
 
     # The CMake half of the same offer, so find_package(gspro CONFIG) yields the
     # same gspro::gspro that add_subdirectory() does.

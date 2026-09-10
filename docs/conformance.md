@@ -13,8 +13,11 @@ that when a client is dropped or a new one appears the suite can be re-derived r
 re-argued. ⚠ **No case here has yet been run against a real launch monitor**; the matrix is
 read from source, and design §11's package 7 is where it meets hardware.
 
-**The suite is built, runs, and is green.** `tests/` holds **103 cases** across eight binaries, plus the sans-I/O gate and a Python fixture cross-check that needs no C at
-all. It was written before the library, so that the specification was one that could be run
+**The suite is built, runs, and is green.** `tests/` holds **103 socket-free cases** across
+eight binaries, plus the sans-I/O gate and a Python fixture cross-check that needs no C at
+all — and the host-transport family (§3.8) on top of that, **twice**: nine cases against the
+asyncio reference adapter and the same nine, with four more about the transport itself,
+against the C one behind `GS_BUILD_NET`. It was written before the library, so that the specification was one that could be run
 rather than one that could only be read; every case now passes against the core, in both
 configurations:
 
@@ -126,7 +129,11 @@ the real path is the strongest evidence in this survey short of a capture:
 Each case names the input, the required outcome, and the sources that make it necessary.
 Prefix: **F** framing, **D** decode, **K** kind, **R** reply, **P** player and session, **C**
 connection, **X** robustness, **T** host transport. A case marked **[T]** is verified against
-the host's socket adapter with `gsp_shoot.py`, not against the library alone.
+a host's socket adapter — with `gsp_shoot.py`, or with the C client half of
+[`tests/gs_net_client.h`](../tests/gs_net_client.h) — and not against the library alone. ⚠ **A
+T case is therefore written once per adapter rather than once**, and
+[`tests/test_coverage.py`](../tests/test_coverage.py) fails a T row that reaches only one of
+them.
 
 ### 3.1 Framing
 
@@ -247,22 +254,37 @@ the host's socket adapter with `gsp_shoot.py`, not against the library alone.
 
 ### 3.8 Host transport [T]
 
-Run with `gsp_shoot.py` against the host's adapter (PinPoint's `GsProMonitor`, the Python
-asyncio transport, the C reference transport).
+These ten rows are about a **host** rather than about the library: the library owns no socket
+by construction, so nothing in the rest of the suite can see reply latency, whether a 200 and a
+201 reached the wire as two writes, or what happens when a client vanishes mid-message. Each
+row is therefore run against **every** host adapter — driven by `gsp_shoot.py`, or by the C
+client half in `tests/gs_net_client.h`.
 
-**Nine of the ten run today**, in [`../tests/test_python_transport.py`](../tests/test_python_transport.py),
-against the asyncio reference transport over loopback — `ctest -R python_transport`.
+**Nine of the ten run today, against two adapters:**
 
-⚠ **That is one host adapter on one machine over the friendliest network there is.** Loopback
-does not reorder, rarely drops, and its segmentation is not a LAN's. The same checklist has to
-be run again against PinPoint's `QTcpServer` adapter and the C reference transport; a green run
-means *this* host is correct *here*.
+| Adapter | Suite | Run it |
+|---|---|---|
+| `python/gspro/asyncio_transport.py` | [`../tests/test_python_transport.py`](../tests/test_python_transport.py) | `ctest -R python_transport` |
+| `net/gs_net.c` (`gspro_net`, C) | [`../tests/test_net.c`](../tests/test_net.c) | `ctest -R test_net` (needs `GS_BUILD_NET`) |
+| PinPoint Studio's `QTcpServer` | lives in PinPoint | design §11 package 8 |
+
+⚠ **Running it twice is not redundancy.** These rows are the promises a *host* can break on
+its own — Nagle left on, two replies concatenated, bytes split before `on_bytes`, a timer never
+re-armed after a poll — and the two adapters share no code below the socket: an asyncio event
+loop and a `select()` loop are different platform code making the same promises. The C suite
+drives both ends from one thread, so a failure is reproducible rather than a race.
+
+⚠ **Both are still one machine over the friendliest network there is.** Loopback does not
+reorder, rarely drops, and its segmentation is not a LAN's. A green run means *this* host is
+correct *here*.
 
 ⚠ **CT-T06 is not automated and is not pretended.** It needs a client on a second machine, and
 it is the one case that can tell a listener bound to `0.0.0.0` from one bound to loopback —
 which is the difference between a launch monitor working and not (design §6.1). Run
-`tools/gsp_listen.py --host 0.0.0.0` and aim `tools/gsp_shoot.py` at it from another machine.
-`tests/test_coverage.py` carries it as the single deferred id, with that reason.
+`tools/gsp_listen.py --host 0.0.0.0` (or `gsplisten --host 0.0.0.0`, which needs no Python at
+the far end) and aim `tools/gsp_shoot.py` at it from another machine. `tests/test_coverage.py`
+carries it as the single deferred id, with that reason, and **both** transport suites print the
+instructions at the end of a run rather than letting a green result imply the row was covered.
 
 | Case | Drive | Required | Because |
 |---|---|---|---|
@@ -276,6 +298,13 @@ which is the difference between a launch monitor working and not (design §6.1).
 | CT-T08 | Client disconnects mid-message | `CONNECTION_CLOSED`, no event for the partial | |
 | CT-T09 | Bind while 921 is held by another process | host reports `Error` state with the reason; no crash | design §6 |
 | CT-T10 | Host reply size | every write ≤ `GSP_WRITE_MAX`, one `write()` call each | design §5.5 |
+
+⚠ **CT-T10's "one `write()` call each" is asserted on the sending side, by counting syscalls.**
+It cannot be seen from the client: TCP may merge two writes into one segment and split one into
+two, so a client counting reads is measuring the kernel. The Python run wraps the asyncio
+writer; the C run compares `gsp_net_stats.sends` (syscalls) with `.writes` (requests) and
+requires them equal, including for the `{201}{202}` pair a new connection is owed while a
+session is active — the case where two requests really are queued at once.
 
 ⚠ **CT-T05's window is five seconds by default, not five minutes.** The row is right and the
 suite runs a shortened form so that CI is not held for five minutes per platform; `GSP_SOAK=1`

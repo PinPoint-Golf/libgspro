@@ -3,8 +3,14 @@
 # The conformance suite
 
 The executable form of [`../docs/conformance.md`](../docs/conformance.md): the CT- cases over
-eight C binaries and two Python programs (the ABI pin and the host-transport cases), plus the
-sans-I/O gate and two cross-checks that need no C at all.  `ctest --preset dev` runs 13 tests.
+nine C binaries and two Python programs (the ABI pin and the host-transport cases), plus a
+smoke test of the `gsplisten` tool, the sans-I/O gate and two cross-checks that need no C at
+all.  `ctest --preset dev` runs 15 tests.
+
+⚠ **The host-transport family runs TWICE, against two adapters** (conformance §3.8): once on
+the asyncio reference transport and once on the C one, which share no code below the socket.
+A CT-T case is therefore expected in two files, and `test_coverage.py` fails a T row that
+reaches only one of them.
 
 ```sh
 cmake --preset dev && cmake --build --preset dev && ctest --preset dev
@@ -38,7 +44,10 @@ which has not happened yet.
 | `test_robust.c` | CT-X — hostile input, ring behaviour, ABI |
 | `test_api.c` | The vocabulary tables, the redaction sweep, the documented defaults |
 | `test_python_abi.py` | The ctypes binding's structs, offsets, enums and bounds against `tools/gs_abi_table.c` — the compiler's own layout (CT-X07) |
-| `test_python_transport.py` | CT-T — a host driving a real socket: reply latency, one write per message, spacing, a client vanishing mid-message |
+| `test_python_transport.py` | CT-T — a host driving a real socket: reply latency, one write per message, spacing, a client vanishing mid-message. Adapter: the **asyncio** transport |
+| `test_net.c` | The same CT-T rows against the **C** reference transport (`gspro_net`, `GS_BUILD_NET`), plus four cases about the transport's own contract. Both ends run on one thread, so a failure is reproducible rather than a race |
+| `gs_net_client.h` | The client half of those: a launch monitor simulator in C, framing replies with the library's own `gsp_frame_find()` |
+| `test_gsplisten.py` | The `gsplisten` tool end to end, as a user runs it — arguments, the announced port, the 201/202/200 a client sees, redaction, the exit path. ⚠ No CT id: it is our tool, not the protocol |
 | `test_fixtures.py` | The fixtures checked against the protocol document **in Python**, so the evidence and the decoder cannot be wrong together |
 | `test_coverage.py` | Every `CT-` row in the document has a case and every case has a row. ⚠ A case may be deferred, but only by id and with a reason, in that file |
 | `purity.cmake` | The library must not reference `socket`, `bind`, `accept`, a clock, a thread or a file |
@@ -59,7 +68,10 @@ falls — a retired case — stays visible.
    client that demands it**. A case with no client behind it is a preference, and preferences
    do not belong in a conformance suite.
 2. Name the function for the row: `GS_TEST(CT_D25_something_specific)`. A failure prints that
-   name, and the reader goes to one table row that says why the case exists.
+   name, and the reader goes to one table row that says why the case exists.  ⚠ A **CT-T** row
+   is a host's promise rather than the library's, so it is written once **per adapter** — in
+   `test_python_transport.py` and in `test_net.c` — and `test_coverage.py` says so if one is
+   missing.
 3. If it needs new bytes, add a fixture and a row to [`fixtures/README.md`](fixtures/README.md)
    saying **the one thing it is there to pin**.
 4. ⚠ **Guard anything that reads the result of a call that can fail.** `GS_ASSERT` reports and
