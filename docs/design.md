@@ -673,7 +673,20 @@ still yields `spinRate` and `spinAxis`, and the reading's provenance records the
 link, with an on/off badge) gets a port, an interface (all / loopback), and the connection pill
 text from `gsp_connection_info()`.
 
-### 6.1 Bind address and the firewall
+### 6.1 Bind address, privilege and the firewall
+
+⚠ **PORT 921 CANNOT BE BOUND BY AN ORDINARY USER ON macOS OR LINUX**, and this document said
+nothing about it until PinPoint's connector tried: the port is below 1024, so those kernels
+reserve it for root and `bind()` returns `EACCES`. The vendor chose 921 on Windows, which has no
+such rule. Two of the three platforms PinPoint ships on therefore cannot use the protocol's own
+default port at all, and the answer is **not** privileges — an unauthenticated listener (§9.3)
+is the last process that should run as root. The answer is a port above 1024 on this side and
+the same port set in the launch monitor's app, which every client examined can do.
+
+That makes the port setting load-bearing rather than a nicety, and it makes the *error message*
+load-bearing too: "permission denied" and "address already in use" have opposite fixes, and a
+host that reports both as "cannot bind" sends a user looking at the wrong thing. PinPoint's
+connector tells them apart and names the fix in each case.
 
 **Bind all interfaces by default, not loopback.** [GSP] documents 127.0.0.1 because it assumes
 the connector runs on the GSPro PC, but the useful case for a coaching studio is the opposite: a

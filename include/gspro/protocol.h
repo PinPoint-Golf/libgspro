@@ -23,7 +23,18 @@ extern "C" {
 /* Transport (protocol §1)                                                   */
 /* ------------------------------------------------------------------------ */
 
-/* [GSP] writes it "0921".  Decimal 921; every client defaults to it. */
+/*
+ * [GSP] writes it "0921".  Decimal 921; every client defaults to it.
+ *
+ * ⚠ IT IS A PRIVILEGED PORT EVERYWHERE EXCEPT WINDOWS.  921 is below 1024, so
+ * macOS and Linux reserve it for root: an ordinary user's bind() returns EACCES,
+ * and a host that reports that as "cannot bind" sends the user looking at their
+ * launch monitor.  The vendor chose it on Windows, where no such rule exists.
+ * The fix is a port above 1024 on both sides — every client examined has a port
+ * setting — and NOT elevated privileges, because this listener is
+ * unauthenticated by design (design §9.3).  Found by PinPoint Studio's connector
+ * on macOS; design §6.1.
+ */
 #define GSP_DEFAULT_PORT 921
 
 /* The ONLY other port GSPro Connect itself can use: [SLX] documents
