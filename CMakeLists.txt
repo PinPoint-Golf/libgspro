@@ -203,12 +203,52 @@ endif()
 # ---------------------------------------------------------------------------
 # Install
 # ---------------------------------------------------------------------------
+#
+# ⚠ GS_INSTALL, because an install rule declared here lands in the CONSUMER's
+# install manifest.  Embedded and ungated, `make install` or a CPack run in the
+# consuming project (PinPoint Studio) would ship libgspro.a, this whole header
+# tree and gspro.pc into a bundle nobody meant to put them in.
 if(GS_INSTALL)
     include(GNUInstallDirs)
     install(TARGETS gspro EXPORT gsproTargets
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+    # ⚠ The umbrella header is include/gspro/gspro.h, so the directory install
+    # below already carries it.  A separate install(FILES include/gspro.h) —
+    # which is what shipped here first — names a file that does not exist and
+    # fails the whole install; nothing ever ran the rules, so nothing caught it.
     install(DIRECTORY include/gspro DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-    install(FILES include/gspro.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tools/gspro.pc.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/gspro.pc @ONLY)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gspro.pc
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+
+    # The CMake half of the same offer, so find_package(gspro CONFIG) yields the
+    # same gspro::gspro that add_subdirectory() does.
+    #
+    # ⚠ THE EXPORT SET ABOVE IS INERT WITHOUT THIS.  `EXPORT gsproTargets` was
+    # declared on the target and never installed, which looked like a package
+    # config existed when none did — find_package(gspro) found nothing.
+    #
+    # ⚠ SameMinorVersion, not SameMajorVersion.  At 0.x the major is zero and
+    # SameMajorVersion would declare 0.1 and 0.9 interchangeable, the opposite
+    # of what a pre-1.0 version means.
+    include(CMakePackageConfigHelpers)
+    install(EXPORT gsproTargets
+            FILE      gsproTargets.cmake
+            NAMESPACE gspro::
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/gspro)
+    configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/gspro-config.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/gspro-config.cmake
+        INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/gspro)
+    write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/gspro-config-version.cmake
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMinorVersion)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/gspro-config.cmake
+                  ${CMAKE_CURRENT_BINARY_DIR}/gspro-config-version.cmake
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/gspro)
 endif()

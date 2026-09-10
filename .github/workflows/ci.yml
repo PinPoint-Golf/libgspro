@@ -39,6 +39,62 @@ jobs:
         run: ctest --test-dir build --build-config Debug --output-on-failure
 
   # ---------------------------------------------------------------------------
+  # ⚠ THE INSTALL RULES ARE EXECUTED, because the last time they were not they
+  # were broken for the whole life of the project: install(FILES) named a header
+  # that does not exist and EXPORT gsproTargets was declared but never installed,
+  # so `cmake --install` failed and find_package(gspro) found nothing.  Neither
+  # showed up until someone ran them.  This job runs them and then CONSUMES the
+  # result — a separate project that find_package(gspro CONFIG)s the install
+  # tree and links gspro::gspro — which is exactly what PinPoint Studio will do
+  # (design §11 package 8).
+  # ---------------------------------------------------------------------------
+  install:
+    name: install and consume
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure and build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_INSTALL_PREFIX=$PWD/_inst \
+                -DGS_BUILD_TESTS=OFF -DGS_BUILD_TOOLS=OFF -DGS_BUILD_FFI=OFF
+          cmake --build build --parallel
+      - name: Install
+        run: cmake --install build
+      - name: Consume via find_package(gspro CONFIG)
+        run: |
+          mkdir -p _consumer
+          cat > _consumer/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.16)
+          project(consumer C)
+          find_package(gspro CONFIG REQUIRED)
+          add_executable(consumer main.c)
+          target_link_libraries(consumer PRIVATE gspro::gspro)
+          CMAKE
+          cat > _consumer/main.c <<'MAIN'
+          #include "gspro/gspro.h"
+          #include <stdio.h>
+          #include <string.h>
+          int main(void) {
+              const char *s = "{\"DeviceID\":\"x\",\"ShotDataOptions\":"
+                              "{\"ContainsBallData\":false,\"ContainsClubData\":false}}";
+              gsp_message m;
+              if (gsp_message_decode((const uint8_t *)s, strlen(s), &m) != GSP_OK) return 1;
+              printf("consumed gspro %s, kind=%d\n", gsp_version_string(), m.kind);
+              return 0;
+          }
+          MAIN
+          cmake -S _consumer -B _consumer/build -DCMAKE_PREFIX_PATH=$PWD/_inst
+          cmake --build _consumer/build
+          ./_consumer/build/consumer
+      - name: Consume via pkg-config
+        run: |
+          export PKG_CONFIG_PATH=$PWD/_inst/lib/pkgconfig
+          test "$(pkg-config --modversion gspro)" = "0.1.0"
+          cc _consumer/main.c $(pkg-config --cflags --libs gspro) -o _pc_consumer
+          ./_pc_consumer
+
+  # ---------------------------------------------------------------------------
   # How much of the specification the library satisfies, as a number in the run
   # summary.  Never blocks — `build` above is the gate — but a case count that
   # quietly falls is visible here even when every binary still exits 0, which is
